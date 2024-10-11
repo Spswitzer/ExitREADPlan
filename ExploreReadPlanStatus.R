@@ -1,19 +1,125 @@
+# # Script header ----
+# Title: READ Plan Flags
+# Author: Susan Switzer
+# Created: 10/08/24
+# Revised: 
+# The purpose of this script is to determine which 3rd students (2023-2024) from the kindergarten class of 2020-2021 had a READ plan at any time and when/if they exited the plan
 
+#load libraries ----
 library(odbc)
 library(DBI)
 library(janitor)
 library(tidyverse)
+# connect to SQL database ----
 con <- dbConnect(odbc(),
                  Driver = "SQL Server",
                  Server = "qdc-soars-test",
                  trusted_connection = "true",
                  Port = 1433)
 
-
-
 sort(unique(odbcListDrivers()[[1]]))
 
-##standard DIBELS pull
+# Query of READ Plan Flag in Campus ----
+qryFlags <- odbc::dbGetQuery(con, 
+                                "
+SELECT
+ V_ProgramParticipation.name
+ ,V_ProgramParticipation.personID
+ ,V_ProgramParticipation.startDate
+ ,V_ProgramParticipation.endDate
+ ,Enrollment.Grade
+ ,Enrollment.CampusSchoolName
+ ,Enrollment.EnrollmentStartDate
+ ,Enrollment.EnrollmentEndDate
+ ,Enrollment.EndYear
+FROM 
+  Jeffco_IC.dbo.V_ProgramParticipation (NOLOCK)
+JOIN AchievementDW.dim.Enrollment (NOLOCK) ON 
+  Enrollment.PersonID = V_ProgramParticipation.PersonID
+WHERE
+ name = 'READ'
+--AND
+--V_ProgramParticipation.personID in (1523935,1522073, 1632653)
+AND
+  V_ProgramParticipation.active = 1
+AND 
+  Enrollment.DeletedInCampus = 0
+AND 
+  Enrollment.LatestRecord = 1
+AND 
+  Enrollment.EnrollmentType = 'Primary'
+--AND 
+ -- endDate > '2024-01-01 00:00:00'
+"
+)
+
+### Transform query date fields ----
+# filter to students of interest
+flagStart <- qryFlags %>% 
+  mutate(startDate = as_date(startDate), # format as date
+         endDate = as_date(endDate),
+         PlanStartDate = ymd(startDate), # format as Year, Month, Day
+         planEndDate = ymd(endDate), 
+         EnrollmentStartDate = ymd(EnrollmentStartDate), 
+         EnrollmentEndDate = ymd(EnrollmentEndDate),
+         enrollmentInterval = interval(EnrollmentStartDate, EnrollmentEndDate), #create time interval
+         planStartInterval = PlanStartDate %within% enrollmentInterval, #determine if plan dates is within time interval
+         planEndInterval = planEndDate %within% enrollmentInterval,
+         planStart = ifelse(planStartInterval == TRUE, "Start plan", NA), #report if plan was started
+         planEnd = ifelse(planEndInterval == TRUE,"Exit plan", NA)) %>% #report if plan was ended
+  select(personID, Grade, CampusSchoolName, EnrollmentStartDate, PlanStartDate, planStart, EnrollmentEndDate, planEndDate, planEnd, EndYear) %>%
+  filter(EnrollmentEndDate < '2024-06-30' | is.na(EnrollmentEndDate)) %>% #exclude enrollments in the 2025 school year
+  mutate(gradeInt = case_when(
+    Grade == 'K' ~ 0, 
+    Grade == 'PK' ~ -1, 
+    Grade == 'It' ~ -2, 
+    TRUE ~ as.numeric(Grade)
+  )) %>% # convert grade grade to numeric value to arrange/sort by
+  filter(gradeInt < 4) %>% 
+  arrange(personID, gradeInt, desc(planStart), desc(planEnd)) %>% 
+  mutate(grade3In24 = case_when(
+    gradeInt == 3 & EndYear == 2024 ~ 'Y', 
+    TRUE ~ NA
+  )) %>% 
+  filter(EndYear > 2020) %>% 
+  group_by(personID) %>% 
+  fill(grade3In24, .direction = 'up') %>% 
+  filter(grade3In24 == 'Y')
+
+## Transform data into long format to add in summarizing ----
+flagLonger <- flagStart %>% 
+  select(personID, Grade, planStart, planEnd) %>% 
+  pivot_longer(c(planStart, planEnd), 
+               names_to = 'status') %>% 
+  filter(!is.na(value)) %>% 
+  select(-status)   
+
+### Generate summary table ----
+GradeSummary <- flagLonger %>% 
+  group_by(Grade) %>% 
+  mutate(gradeN = n()) %>% 
+  group_by(value) %>% 
+  mutate(totalN = n()) %>% 
+  group_by(Grade, value) %>% 
+  summarise(totalN = first(totalN), 
+            gradeN = first(gradeN),
+            statusN = n(), 
+            endPct = round(statusN/gradeN*100, 2))
+
+## Transform data into Wide format to add in summarizing ----
+flagWider <- flagLonger %>% 
+  pivot_wider(names_from = Grade, 
+              names_prefix = "Grade",
+              values_from = value, 
+              values_fn = list) %>% 
+  select(personID, GradeK, Grade1, Grade2, Grade3) %>%
+  mutate(across(GradeK:Grade3, ~replace(., lengths(.) == 0, NA))) %>% 
+  mutate(across(GradeK:Grade3, ~str_replace(., '^c(.*)$', 
+                                            'Start and Exit plan')))#clean up output
+
+# Query DIBELS8 ----
+# which only holds data from 2023-2024 +
+# some students repeated due to multiple tests for single window due to re-testing and testing in Spanish
 qryDibels8 <- odbc::dbGetQuery(con, "
 
 SELECT  studentdemographic.personid AS 'PersonID'
@@ -141,9 +247,8 @@ dibels8ReadStatus <- DIBELS %>%
   summarise() %>% 
   filter(testingPeriodName == 'End')
 
-
-
-##the query below pulls from a view which only holds >=2022 
+# Query Acadience----
+# which only holds data from 2021-2022  & 2022-2023 
 qryAcadience <- odbc::dbGetQuery(con, "
 SELECT  vAcadienceStudentList.PersonID
       ,vAcadienceStudentList.GradeDescription AS 'gradedescription'
@@ -226,6 +331,8 @@ dibelsNextReadStatus <- qryAcadience %>%
   summarise() 
 
 
+# Query DIBELS6----
+# which only holds data from 2020-2021 and prior
 dibelsOld <- odbc::dbGetQuery(con, "
 SELECT  
       PersonID
@@ -253,9 +360,9 @@ SELECT
   WHERE  StandardLevelName = 'Overall'
                               ")
 
-
+# Query Student Demograpics ----
 qryStuDemos <- odbc::dbGetQuery(con, 
-"
+                                "
 SELECT
   StudentDemographic.StudentNumber
   ,StudentDemographic.PersonID
@@ -299,18 +406,7 @@ studentDemos <- qryStuDemos %>%
          str_detect(READStatus, 'Exit')) %>% 
   distinct(PersonID, .keep_all = T)
 
-
-michaelMackie <- qryDibels8 %>% 
-  filter(PersonID == 2292860) %>% 
-  select(readstatus, ProficiencyLongDescription, StudentTestDate, TestingPeriodName)
-
-julianPerez <- qryAcadience %>% 
-  filter(PersonID == 1610465) %>% 
-  select(readstatus, ProficiencyLongDescription, StudentTestDate, TestingPeriodName)
-
-
-
-# SQL Query to access CMAS results ----
+# Query to CMAS results ----
 cmasData <- dbGetQuery(con, 
                        "
 
@@ -371,123 +467,5 @@ cmasData <- dbGetQuery(con,
                         
                         ")
 
-library(janitor)
-
-dibels24Grade3 <- qryDibels8 %>% 
-  clean_names('lower_camel') %>% 
-  filter(endYear == 2024, 
-         gradeId == 3, 
-         testingPeriodName == 'End',
-         str_detect(readstatus, 'Exit')
-         ) %>% 
-  group_by(personId) 
-
-exitedWithSpanish <- dibels24Grade3 %>% 
-  mutate(n = n()) %>% 
-  filter(n > 1)
-
-dibels24Grade3distinct <- dibels24Grade3 %>% 
-  ungroup() %>% 
-  filter(contentname == 'READING') %>% 
-  arrange(personId, schoolYear, desc(studentTestDate)) %>%  # most recent testing for students with multiple
-  distinct(personId, testingPeriodName, .keep_all = T)
-  
-         
 
 
-
-qryFlags <- odbc::dbGetQuery(con, 
-                                "
-SELECT
- V_ProgramParticipation.name
- ,V_ProgramParticipation.personID
- ,V_ProgramParticipation.startDate
- ,V_ProgramParticipation.endDate
- ,Enrollment.Grade
- ,Enrollment.CampusSchoolName
- ,Enrollment.EnrollmentStartDate
- ,Enrollment.EnrollmentEndDate
- ,Enrollment.EndYear
-FROM 
-  Jeffco_IC.dbo.V_ProgramParticipation (NOLOCK)
-JOIN AchievementDW.dim.Enrollment (NOLOCK) ON 
-  Enrollment.PersonID = V_ProgramParticipation.PersonID
-WHERE
- name = 'READ'
---AND
---V_ProgramParticipation.personID in (1523935,1522073, 1632653)
-AND
-  V_ProgramParticipation.active = 1
-AND 
-  Enrollment.DeletedInCampus = 0
-AND 
-  Enrollment.LatestRecord = 1
-AND 
-  Enrollment.EnrollmentType = 'Primary'
---AND 
- -- endDate > '2024-01-01 00:00:00'
-"
-)
-
-
-flagStart <- qryFlags %>% 
-  mutate(startDate = as_date(startDate), # format as date
-         endDate = as_date(endDate),
-         PlanStartDate = ymd(startDate), # format as Year, Month, Day
-         planEndDate = ymd(endDate), 
-         EnrollmentStartDate = ymd(EnrollmentStartDate), 
-         EnrollmentEndDate = ymd(EnrollmentEndDate),
-         enrollmentInterval = interval(EnrollmentStartDate, EnrollmentEndDate), #create time interval
-         planStartInterval = PlanStartDate %within% enrollmentInterval, #determine if plan dates is within time interval
-         planEndInterval = planEndDate %within% enrollmentInterval,
-         planStart = ifelse(planStartInterval == TRUE, "Start plan", NA), #report if plan was started
-         planEnd = ifelse(planEndInterval == TRUE,"Exit plan", NA)) %>% #report if plan was ended
-  select(personID, Grade, CampusSchoolName, EnrollmentStartDate, PlanStartDate, planStart, EnrollmentEndDate, planEndDate, planEnd, EndYear) %>%
-  filter(EnrollmentEndDate < '2024-06-30' | is.na(EnrollmentEndDate)) %>% #exclude enrollments in the 2025 school year
-  mutate(gradeInt = case_when(
-    Grade == 'K' ~ 0, 
-    Grade == 'PK' ~ -1, 
-    Grade == 'It' ~ -2, 
-    TRUE ~ as.numeric(Grade)
-  )) %>% # convert grade grade to numeric value to arrange/sort by
-  filter(gradeInt < 4) %>% 
-  arrange(personID, gradeInt, desc(planStart), desc(planEnd)) %>% 
-  mutate(grade3In24 = case_when(
-    gradeInt == 3 & EndYear == 2024 ~ 'Y', 
-    TRUE ~ NA
-  )) %>% 
-  filter(EndYear > 2020) %>% 
-  group_by(personID) %>% 
-  fill(grade3In24, .direction = 'up') %>% 
-  filter(grade3In24 == 'Y')
-
-flagLonger <- flagStart %>% 
-  select(personID, Grade, planStart, planEnd) %>% 
-  pivot_longer(c(planStart, planEnd), 
-               names_to = 'status') %>% 
-  filter(!is.na(value)) %>% 
-  select(-status)   
-  # filter(personID == 1548566)
-
-flagWider <- flagLonger %>% 
-  pivot_wider(names_from = Grade, 
-              names_prefix = "Grade",
-              values_from = value, 
-              values_fn = list) %>% 
-  select(personID, GradeK, Grade1, Grade2, Grade3) %>%
-  mutate(across(GradeK:Grade3, ~replace(., lengths(.) == 0, NA))) %>% 
-  mutate(across(GradeK:Grade3, ~str_replace(., '^c(.*)$', 
-                                            'Start and Exit plan')))#clean up output
-
-
-GradeSummary <- flagLonger %>% 
-  group_by(Grade) %>% 
-  mutate(gradeN = n()) %>% 
-  group_by(value) %>% 
-  mutate(totalN = n()) %>% 
-  group_by(Grade, value) %>% 
-  summarise(totalN = first(totalN), 
-            gradeN = first(gradeN),
-            statusN = n(), 
-            endPct = round(statusN/gradeN*100, 2))
-  
