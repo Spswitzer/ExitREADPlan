@@ -407,7 +407,7 @@ studentDemos <- qryStuDemos %>%
   distinct(PersonID, .keep_all = T)
 
 # Query to CMAS results ----
-cmasData <- dbGetQuery(con, 
+qryCmas <- dbGetQuery(con, 
                        "
 
                   SELECT vPARCCStudentList.PersonID
@@ -467,5 +467,26 @@ cmasData <- dbGetQuery(con,
                         
                         ")
 
+cmasPerformance <- qryCmas %>% 
+  clean_names('lower_camel') %>% 
+  filter(contentGroupName == 'READING', 
+         grade == '3', 
+         endYear == 2024) %>% 
+  select(personId, grade, frlStatus, readStatus, calculatedLanguageProficiency, 
+         gt, ethnicity, gender, iep, primaryDisability, scaleScore, endYear, proficiencyLongDescription,testName)
 
+cmasWithRead <- cmasPerformance %>% 
+  right_join(flagWider, join_by(personId == personID)) %>% 
+  mutate(n = n_distinct(personId)) %>% 
+  group_by(proficiencyLongDescription) %>% 
+  mutate(profN = n(), 
+         profPct = profN/n) 
+  
+
+cmasNoScore <- cmasPerformance %>% 
+  full_join(flagWider, join_by(personId == personID)) %>% 
+  mutate(n = n_distinct(personId)) %>% 
+  filter(is.na(proficiencyLongDescription)) %>% 
+  group_by(readStatus) %>% 
+  mutate(readPlanN = n()) 
 
