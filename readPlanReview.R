@@ -30,11 +30,27 @@ qrystudentPlan <- odbc::dbGetQuery(con,
    ,tStudentNeed.ConcernStartDate
    ,tStudentNeed.LastUpdatedDate
    ,tStudentNeed.ActiveFlag -- Not sure what this indicates
-   ,tStudentNeedFocusArea.StudentNeedFocusAreaID
-    ,tFocusArea.FocusAreaName
-  -- ,tGoal.SmartGoal
+   ,tInstruction.ActiveFlag AS InstFlag
+   ,tStudentNeedFocusArea.ActiveFlag AS NFAFlag
+   ,tGoal.ActiveFlag AS GoalFlag
+   ,tFocusAreaDesignator.ActiveFlag AS FocusFlag
+   ,tGoalInstruction.ActiveFlag AS goalInstFlag
+   ,tNeedType.ActiveFlag AS needFlag
+   ,tStudentNeedFocusArea.ActiveFlag AS focusAreaFlag --The multi-part identifier tStudentFocusArea.ActiveFlag could not be bound.
+   ,tStudentNeedFocusArea.StudentNeedFocusAreaID 
+   ,tFocusArea.FocusAreaName
+  --,tGoal.SmartGoal
    ,tStudentNeedFocusArea.FocusAreaID
+  --,tStudentNeedFocusArea.FocusAreaRanking
+  ,tStudentNeedFocusArea.StartDate AS SNStart
+  ,tStudentNeedFocusArea.EndDate AS SNEnd
   -- ,tGoal.ProgressMonitoring --error: ODBC SQL Server Driver]Invalid Descriptor Index 
+  ,tInstruction.InstructionDescription
+  ,tInstruction.ImplementedDate
+  ,tInstruction.CompletedDate
+  ,tInstruction.InstructionMinutes
+  ,tInstruction.TimesPerWeek
+  ,tFocusAreaDesignator.DesignatorID
   FROM
     dbSOARS.rti.tStudentNeed (NOLOCK)
   JOIN dbSOARS.rti.tStudentNeedFocusArea (NOLOCK) ON
@@ -45,7 +61,14 @@ qrystudentPlan <- odbc::dbGetQuery(con,
    tNeedType.NeedTypeID = tStudentNeed.NeedTypeID
   JOIN dbSOARS.rti.tFocusArea (NOLOCK) ON
    tFocusArea.FocusAreaID = tStudentNeedFocusArea.FocusAreaID
-  --JOIN dbSOARS.rti.tInstruction (NOLOCK) ON
+  JOIN dbSOARS.rti.tGoalInstruction (NOLOCK) ON
+    tGoalInstruction.GoalID = tGoal.GoalID
+  JOIN dbSOARS.rti.tGoalFocusArea (NOLOCK) ON
+    tGoalFocusArea.GoalID = tGoal.GoalID
+  JOIN dbSoARS.rti.tInstruction (NOLOCK) ON
+    tInstruction.InstructionID = tGoalInstruction.InstructionID
+  JOIN dbSOARS.rti.tFocusAreaDesignator (NOLOCK) ON
+    tFocusAreaDesignator.FocusAreaID =  tStudentNeedFocusArea.FocusAreaID
   WHERE
     tNeedType.NeedTypeName = 'READ'
   AND
@@ -54,6 +77,20 @@ qrystudentPlan <- odbc::dbGetQuery(con,
     tstudentNeed.ConcernStartDate < '2024-07-01'
   AND 
     tStudentNeed.ActiveFlag = 1
+  AND
+    tInstruction.ActiveFlag = 1
+  AND
+   tStudentNeedFocusArea.ActiveFlag = 1
+  AND 
+    tGoal.ActiveFlag = 1
+--  AND 
+--    tInstruction.ImplementedDate > '2023-07-01'
+  AND
+ tGoalFocusArea.StartDate > '2023-07-01'
+  AND 
+    tFocusAreaDesignator.ActiveFlag = 1
+  AND 
+    tGoalInstruction.ActiveFlag = 1
   ORDER BY
     tStudentNeed.ConcernStartDate
 "
@@ -61,5 +98,6 @@ qrystudentPlan <- odbc::dbGetQuery(con,
 
 
 focusAreas <- qrystudentPlan %>% 
-  right_join(flagWider, join_by(PersonID == personID))
+  filter(PersonID == 2229924)
+  distinct(studentNeedID, PersonID, LastUpdatedDate, StudentNeedFocusAreaID, FocusAreaID, .keep_all = T)
 
