@@ -30,3 +30,56 @@ qryREADPlanSubmission <- odbc::dbGetQuery(con,
     tREADSubmission.EndYear = 2024
 "
 )
+
+# Remove records noted as excluded ----
+readCleaned <- qryREADPlanSubmission %>% 
+  filter(is.na(Excluded)) %>% 
+  filter(GradeID < 4)
+
+## Summarise services students recieved for SRD ----
+readServices <- readCleaned %>% 
+  pivot_longer(cols = c(SummerSchoolRead, TutorRead, InterventionServicesREAD),
+               names_to = 'service',
+               values_to = 'serviceValue') %>%
+  group_by(GradeID) %>% 
+  mutate(n = n_distinct(personID)) %>% 
+  group_by(ReadPlan, GradeID) %>% 
+  mutate(readPlanN = n_distinct(personID)) %>% 
+  group_by(GradeID, service, serviceValue) %>% 
+  summarise(servicesN = n_distinct(personID), 
+            n = first(n), 
+            servicesPct = round(servicesN/n, 4),
+            readPlanN = first(readPlanN),
+            readPct = round(readPlanN/n, 4)) %>% 
+  filter(serviceValue == 1)
+
+## Summarize N and Percent of students at each school and grade level with READ Plan ----
+readSchools <- readCleaned %>% 
+  select(personID, CDESchoolCode, GradeID, ReadPlan) %>% 
+  group_by(CDESchoolCode) %>% 
+  mutate(schoolN = n()) %>% 
+  group_by(CDESchoolCode, GradeID) %>% 
+  mutate(gradeN = n()) %>% 
+  group_by(CDESchoolCode, GradeID, ReadPlan) %>% 
+  reframe(readPlanN = n(),
+            gradeN = first(gradeN), 
+            gradePct = round(readPlanN/gradeN, 4)
+          ) %>% 
+  filter(ReadPlan == 1)
+
+## Summarize READ Act interim assessment administered used for determine SRD status ----
+### Create look up table of assessments based on https://www.cde.state.co.us/coloradoliteracy/22-23springreadassessmentfilelayoutanddefinitions ---
+readTestName <- data.frame(ReadTest = c('04', '19', '13', 
+                                        '20', '06', '10'), 
+                           TestName = c('Exemption NEP', 'DIBELS8', 'Alternative Assessment', 
+                                        'Lectura', 'Exemption Attendance', 'iReady'))
+
+readTest <- readCleaned %>% 
+  select(personID, GradeID, ReadTest) %>% 
+  group_by(GradeID) %>% 
+  mutate(gradeN = n()) %>% 
+  group_by(ReadTest, GradeID) %>% 
+  reframe(n = n(), 
+         gradeN = first(gradeN)) %>% 
+  full_join(readTestName)
+
