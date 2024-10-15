@@ -83,3 +83,21 @@ readTest <- readCleaned %>%
          gradeN = first(gradeN)) %>% 
   full_join(readTestName)
 
+readTestGender <- readCleaned %>% 
+  select(personID, GradeID, Gender, ReadPlan) %>% 
+  group_by(GradeID, ReadPlan) %>% 
+  mutate(gradeN = n()) %>% 
+  group_by(Gender, GradeID, ReadPlan) %>% 
+  reframe(n = n(), 
+          gradeN = first(gradeN)) %>% 
+  filter(ReadPlan == 1) %>% 
+  mutate(genderPct = n/gradeN) %>% 
+  mutate(genderName = case_when(
+    Gender == '01' ~ 'female', 
+    Gender == '02' ~ 'male', 
+    TRUE ~ 'gender expansive'
+  ))
+
+nOfPlans <- readCleaned %>% 
+  group_by(ReadPlan) %>% 
+  summarise(n = n())
