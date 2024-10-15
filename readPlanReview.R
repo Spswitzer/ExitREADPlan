@@ -30,12 +30,27 @@ qrystudentPlan <- odbc::dbGetQuery(con,
    ,tStudentNeed.ConcernStartDate
    ,tStudentNeed.LastUpdatedDate
    ,tStudentNeed.ActiveFlag -- Not sure what this indicates
+   ,tInstruction.ActiveFlag AS InstFlag -- Not sure what this indicates
+   ,tGoal.ActiveFlag AS GoalFlag -- Not sure what this indicates
+   ,tFocusAreaDesignator.ActiveFlag AS FocusFlag -- Not sure what this indicates
+   ,tGoalInstruction.ActiveFlag AS goalInstFlag -- Not sure what this indicates
+   ,tNeedType.ActiveFlag AS needFlag -- Not sure what this indicates
+   ,tStudentNeedFocusArea.ActiveFlag AS focusAreaFlag -- Not sure what this indicates
    ,tStudentNeedFocusArea.StudentNeedFocusAreaID
-    ,tFocusArea.FocusAreaName
+   ,tFocusArea.FocusAreaName
   -- ,tGoal.SmartGoal
-   ,tStudentNeedFocusArea.FocusAreaID
   -- ,tGoal.ProgressMonitoring --error: ODBC SQL Server Driver]Invalid Descriptor Index 
-  FROM
+   ,tStudentNeedFocusArea.FocusAreaID
+  --,tStudentNeedFocusArea.FocusAreaRanking
+   ,tStudentNeedFocusArea.StartDate AS SNStart
+   ,tStudentNeedFocusArea.EndDate AS SNEnd
+  -- ,tInstruction.InstructionDescription
+  -- ,tInstruction.ImplementedDate
+  -- ,tInstruction.CompletedDate
+  -- ,tInstruction.InstructionMinutes
+  -- ,tInstruction.TimesPerWeek
+   ,tFocusAreaDesignator.DesignatorID
+FROM
     dbSOARS.rti.tStudentNeed (NOLOCK)
   JOIN dbSOARS.rti.tStudentNeedFocusArea (NOLOCK) ON
     tStudentNeedFocusArea.StudentNeedID = tStudentNeed.StudentNeedID
@@ -46,7 +61,15 @@ qrystudentPlan <- odbc::dbGetQuery(con,
   JOIN dbSOARS.rti.tFocusArea (NOLOCK) ON
    tFocusArea.FocusAreaID = tStudentNeedFocusArea.FocusAreaID
   --JOIN dbSOARS.rti.tInstruction (NOLOCK) ON
-  WHERE
+  JOIN dbSOARS.rti.tGoalInstruction (NOLOCK) ON
+    tGoalInstruction.GoalID = tGoal.GoalID
+  JOIN dbSOARS.rti.tGoalFocusArea (NOLOCK) ON
+    tGoalFocusArea.GoalID = tGoal.GoalID
+  JOIN dbSoARS.rti.tInstruction (NOLOCK) ON
+    tInstruction.InstructionID = tGoalInstruction.InstructionID
+  JOIN dbSOARS.rti.tFocusAreaDesignator (NOLOCK) ON
+    tFocusAreaDesignator.FocusAreaID =  tStudentNeedFocusArea.FocusAreaID
+WHERE
     tNeedType.NeedTypeName = 'READ'
   AND
     tStudentNeed.lastUpdatedDate > '2023-07-01'
@@ -58,8 +81,3 @@ qrystudentPlan <- odbc::dbGetQuery(con,
     tStudentNeed.ConcernStartDate
 "
 )
-
-
-focusAreas <- qrystudentPlan %>% 
-  right_join(flagWider, join_by(PersonID == personID))
-
