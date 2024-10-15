@@ -123,58 +123,28 @@ flagWider <- flagLonger %>%
 qryDibels8 <- odbc::dbGetQuery(con, "
 
 SELECT  studentdemographic.personid AS 'PersonID'
-      ,studentdemographic.studentnumber
-      ,studentdemographic.firstname
-      ,studentdemographic.lastname
       ,studentdemographic.frlstatus
       ,studentdemographic.[readstatus]
       ,studentdemographic.calculatedlanguageproficiency
-      ,studentdemographic.[504plan]
       ,studentdemographic.gt
       ,studentdemographic.ethnicity
-      ,studentdemographic.genderdescription as Gender
+      ,studentdemographic.Gender
       ,studentdemographic.iep
-      ,studentdemographic.iepstatus
       ,studentdemographic.primarydisability
-      ,studentdemographic.programtype
+      ,studentdemographic.programtype AS ELLProgram
       ,ttest.gradeid AS 'GradeID'
-      ,trange.proficiencylongdescription                                AS
-        'ProficiencyLongDescription'
-		  ,tTestTestPart.TestTestPartLongDescription AS 'ProficiencyOrder'
-       ,ttest.testid
-       ,ttest.testname
-       ,ttesttype.testtypename
-       ,CONVERT(DATE, CONVERT(VARCHAR(10), DIBELS8Benchmark.assessmentdatekey)) AS
-        StudentTestDate
-       ,SchoolYear.endyear                                               AS
-        EndYear
-       ,tcontent.contentid
+      ,trange.proficiencylongdescription  AS 'ProficiencyLongDescription'
+       ,ttesttype.testtypename AS testTypeName
+       ,CONVERT(DATE, CONVERT(VARCHAR(10), DIBELS8Benchmark.assessmentdatekey)) AS StudentTestDate
+       ,SchoolYear.endyear  AS EndYear
        ,tcontent.contentname
-       ,ttestingperiod.testingperiodid
+       ,ttestingperiod.testingperiodid AS testingPeriodNumeric
        ,ttestingperiod.testingperiodname AS 'TestingPeriodName'
-       ,ttesttestpart.testtestpartid AS 'TestingPartID'
-       ,ttesttestpart.testtestpartlongdescription
-       ,ttesttestpart.testtestpartshortdescription
-       ,ttesttestpart.testtestpartdescription
-       ,trange.rangebottom
-       ,trange.rangetop
-       ,ttestpart.standardlevelid
-       ,tstandardlevel.standardlevelname
-       ,CASE tstandardlevel.standardlevelname
-          WHEN 'Overall' THEN 1
-          ELSE 0
-        END                                                              AS
-        OverallFlag
-       ,tcontentgroup.contentgroupname
-       ,school.school                                                    AS
-        schoolName
-       ,school.cdeschoolnumber                                           AS
-        cdeSchoolNumber
+       ,tcontentgroup.contentgroupname AS 'contentGroupName'
+       ,school.cdeschoolnumber AS cdeSchoolNumber
+       ,school.school AS schoolName
        ,calendar.calendarname
-  		 ,SchoolYear.ReportSchoolYear AS 'SchoolYear' 
-       ,ttest.windowstartdate
-       ,ttest.windowenddate
-  
+
 FROM   achievementdw.fact.DIBELS8Benchmark WITH (nolock)
        JOIN achievementdw.dim.studentdemographic WITH (nolock)
          ON studentdemographic.studentdemographickey =
@@ -228,137 +198,81 @@ FROM   achievementdw.fact.DIBELS8Benchmark WITH (nolock)
        LEFT OUTER JOIN dbsoars.isr.tscoretype WITH (nolock)
                     ON tscoretype.scoretypeid = tscoretypetesttype.scoretypeid
 WHERE  standardlevelname = 'Overall'
-
 ")
 
-dibels8ReadStatus <- DIBELS %>% 
-  clean_names('lower_camel') %>% 
-  filter(gradeId < 4) %>% 
-  arrange(personId, schoolYear, desc(studentTestDate)) %>%  # most recent testing for students with multiple
-  distinct(personId, testingPeriodName, .keep_all = T) %>% 
-  select(endYear = schoolYear, testingPeriodName, gradeId, calculatedlanguageproficiency, 
-         programtype, iep, frlstatus, readstatus, rangebottom, rangetop, cdeSchoolNumber) %>% 
-  group_by(endYear, testingPeriodName, gradeId) %>% 
-  mutate(totalN = n()) %>% 
-  group_by(endYear, readstatus, testingPeriodName, gradeId) %>% 
-  mutate(statusN = n(), 
-         statusPct = statusN/totalN) %>% 
-  group_by(endYear, readstatus, totalN, statusN, statusPct, testingPeriodName, gradeId) %>% 
-  summarise() %>% 
-  filter(testingPeriodName == 'End')
+dibels8Grade3 <- qryDibels8 %>% 
+  filter(EndYear == 2024) %>% 
+  clean_names('lower_camel')
 
 # Query Acadience----
 # which only holds data from 2021-2022  & 2022-2023 
 qryAcadience <- odbc::dbGetQuery(con, "
-SELECT  vAcadienceStudentList.PersonID
-      ,vAcadienceStudentList.GradeDescription AS 'gradedescription'
-      ,vAcadienceStudentList.Grade
+SELECT  
+      vAcadienceStudentList.PersonID
       ,vAcadienceStudentList.FRLStatus AS 'frlstatus'
       ,vAcadienceStudentList.READStatus AS 'readstatus'
       ,vAcadienceStudentList.CalculatedLanguageProficiency AS 'calculatedlanguageproficiency'
-      ,vAcadienceStudentList.[504Plan] 
       ,vAcadienceStudentList.GT AS 'gt'
       ,vAcadienceStudentList.Ethnicity AS 'ethnicity'
-      ,vAcadienceStudentList.Gender AS 'gender'
-      ,vAcadienceStudentList.GenderDescription AS 'genderdescription'
+      ,vAcadienceStudentList.Gender
       ,vAcadienceStudentList.IEP AS 'iep'
-      ,vAcadienceStudentList.IEPStatus AS 'iepstatus'
       ,vAcadienceStudentList.PrimaryDisability AS 'primarydisability'
-      ,vAcadienceStudentList.ProgramType AS 'programtype'
-      ,vAcadienceStudentList.PercentOfPoints
-      ,vAcadienceStudentList.ScaleScore
+      ,vAcadienceStudentList.ProgramType AS 'ELLProgram'
+      ,vAcadienceStudentList.GradeID
+--  ,vAcadienceStudentList.ScaleScore
       ,vAcadienceStudentList.ProficiencyLongDescription
-      ,vAcadienceStudentList.TestID AS 'testid'
-      ,vAcadienceStudentList.TestName AS 'testname'
-      ,vAcadienceStudentList.TestTypeName AS 'testtypename'
+      ,vAcadienceStudentList.TestTypeName AS 'testTypeName'
       ,vAcadienceStudentList.StudentTestDate 
       ,vAcadienceStudentList.EndYear
-      ,vAcadienceStudentList.ContentID AS 'contentid'
       ,vAcadienceStudentList.ContentName AS 'contentname'
-      ,vAcadienceStudentList.TestingPeriodID AS 'testingperiodid'
+      ,vAcadienceStudentList.TestingPeriodID AS 'testingPeriodNumeric'
       ,vAcadienceStudentList.TestingPeriodName
-      ,vAcadienceStudentList.TestTestPartID
-      ,vAcadienceStudentList.TestTestPartLongDescription AS 'testtestpartlongdescription'
-      ,vAcadienceStudentList.TestTestPartShortDescription AS 'testtestpartshortdescription'
-      ,vAcadienceStudentList.TestTestPartDescription AS 'testtestpartdescription'
-      ,vAcadienceStudentList.RangeBottom AS 'rangebottom'
-      ,vAcadienceStudentList.RangeTop AS 'rangetop'
-      ,vAcadienceStudentList.StandardLevelID AS 'standardlevelid'
-      ,vAcadienceStudentList.StandardLevelName AS 'standardlevelname'
-      ,vAcadienceStudentList.OverallFlag
-      ,vAcadienceStudentList.ContentGroupName AS 'contentgroupname'
-      ,vAcadienceStudentList.TestedAtSchool
-      ,vAcadienceStudentList.TestedAtSchoolNumber
+      ,vAcadienceStudentList.ContentGroupName AS 'contentGroupName'
+      ,vAcadienceStudentList.TestedAtSchool AS schoolName
+      ,vAcadienceStudentList.TestedAtSchoolNumber AS cdeSchoolNumber
       ,vAcadienceStudentList.CalendarName AS 'calendarname'
-      ,vAcadienceStudentList.Score
-	  ,vAcadienceStudentList.studenttestdate --there are only 68 distinct dates- does this sound correct?
-	  ,StudentDemographic.FirstName AS 'firstname'
-	  ,StudentDemographic.LastName AS 'lastname'
-	  ,StudentDemographic.StudentNumber AS 'studentnumber'
-,vAcadienceStudentList.TestedAtSchool
-,vAcadienceStudentList.TestedAtSchoolNumber AS 'CDESchoolNumber'
-,vAcadienceStudentList.ProficiencyReportOrder AS 'ProficiencyOrder'
-,vAcadienceStudentList.GradeID 
-,vAcadienceStudentList.SchoolYear
-,vAcadienceStudentList.WindowStartDate AS 'windowstartdate'
-,vAcadienceStudentList.WindowEndDate AS 'windowenddate'
   FROM dbSoars.acadience.vAcadienceStudentList WITH (NOLOCK)
  LEFT JOIN AchievementDW.dim.StudentDemographic WITH (NOLOCK) ON vAcadienceStudentList.PersonID = StudentDemographic.PersonID
 	AND vAcadienceStudentList.StudentTestDate BETWEEN StudentDemographic.RecordStartDate AND StudentDemographic.RecordEndDate
   WHERE vAcadienceStudentList.StandardLevelName = 'Overall'
 ")
 
-
-dibelsNextReadStatus <- qryAcadience %>% 
-  clean_names('lower_camel') %>% 
-  mutate(gradeId = case_when(
-    grade == 'K' ~ 0, 
-    TRUE ~ as.numeric(gradeId)
-  )) %>% 
-  # filter(gradeId < 4) %>% 
-  filter(testingPeriodName == 'End', 
-         endYear == 2023) %>% 
-  arrange(personId, endYear, desc(studentTestDate)) %>%  # most recent testing for students with multiple
-  distinct(personId, testingPeriodName, .keep_all = T) %>% 
-  select(endYear, testingPeriodName, gradeId, calculatedlanguageproficiency, 
-         programtype, iep, frlstatus, readstatus, rangebottom, rangetop, cdeSchoolNumber) %>% 
-  group_by(endYear, testingPeriodName, gradeId) %>% 
-  mutate(totalN = n()) %>% 
-  group_by(endYear, readstatus, testingPeriodName, gradeId) %>% 
-  mutate(statusN = n(), 
-         statusPct = statusN/totalN) %>% 
-  group_by(endYear, readstatus, totalN, statusN, statusPct, testingPeriodName, gradeId) %>% 
-  summarise() 
+dibelsNext <- qryAcadience%>% 
+  filter(EndYear %in% c(2022, 2023))%>% 
+  clean_names('lower_camel') 
 
 
 # Query DIBELS6----
 # which only holds data from 2020-2021 and prior
-dibelsOld <- odbc::dbGetQuery(con, "
+qryOldDibels <- odbc::dbGetQuery(con, "
 SELECT  
-      PersonID
-      ,gradeID AS Grade
-      ,LanguageProficiency AS CalculatedLanguageProficiency
-      ,IEP
-      ,FRL
-      ,GT
-      ,Ethnicity
-      ,Gender
-      ,EndYear
-	  ,ScaleScore
-	  ,ProficiencyLongDescription
-	  ,TestID
-	  ,TestName
-	  ,TestTypeName
-	  ,TestingPeriodID
-	  ,TestingPeriodName
-	  ,TestTestPartDescription AS TestPartDescription
-	  ,StandardLevelName
-	  ,schoolName AS School
-	  ,CampusSchoolID
-	  ,Score
+  studentdemographic.personid AS 'PersonID'
+      ,studentdemographic.frlstatus
+      ,studentdemographic.[readstatus]
+      ,studentdemographic.calculatedlanguageproficiency
+      ,studentdemographic.gt
+      ,studentdemographic.ethnicity
+      ,studentdemographic.genderdescription as Gender
+      ,studentdemographic.iep
+      ,studentdemographic.primarydisability
+      ,studentdemographic.programtype AS ELLProgram
+      ,vAcadienceStudentListPre2022.GradeID
+
+	  ,vAcadienceStudentListPre2022.ProficiencyLongDescription
+	  ,vAcadienceStudentListPre2022.TestTypeName
+	  ,vAcadienceStudentListPre2022.TestingPeriodID AS 'testingPeriodNumeric'
+	  ,vAcadienceStudentListPre2022.TestingPeriodName
+	        ,vAcadienceStudentListPre2022.EndYear
+	  ,vAcadienceStudentListPre2022.schoolName AS schoolName
   FROM dbSoars.acadience.vAcadienceStudentListPre2022
-  WHERE  StandardLevelName = 'Overall'
+   LEFT JOIN AchievementDW.dim.StudentDemographic WITH (NOLOCK) ON vAcadienceStudentListPre2022.PersonID = StudentDemographic.PersonID
+  WHERE  vAcadienceStudentListPre2022.StandardLevelName = 'Overall'
+  AND vAcadienceStudentListPre2022.EndYear = 2021
+  AND vAcadienceStudentListPre2022.GradeID = 0
                               ")
+
+dibels6 <- qryOldDibels %>% 
+  clean_names('lower_camel') 
 
 # Query Student Demograpics ----
 qryStuDemos <- odbc::dbGetQuery(con, 
@@ -472,8 +386,7 @@ cmasPerformance <- qryCmas %>%
   filter(contentGroupName == 'READING', 
          grade == '3', 
          endYear == 2024) %>% 
-  select(personId, grade, frlStatus, readStatus, calculatedLanguageProficiency, 
-         gt, ethnicity, gender, iep, primaryDisability, scaleScore, endYear, proficiencyLongDescription,testName)
+  select(personId, grade, cmasProfLevel = proficiencyLongDescription, testName)
 
 cmasWithRead <- cmasPerformance %>% 
   right_join(flagWider, join_by(personId == personID)) %>% 
@@ -490,3 +403,16 @@ cmasNoScore <- cmasPerformance %>%
   group_by(readStatus) %>% 
   mutate(readPlanN = n()) 
 
+dibelsCombined <- dibels8Grade3 %>% 
+  full_join(dibels6) %>% 
+  full_join(dibelsNext) 
+
+dibelsWithFlag <-  dibelsCombined %>% 
+  right_join(flagStart, 
+             join_by(personId == personID, 
+                     endYear == EndYear, 
+                     gradeId == gradeInt), 
+             relationship = "many-to-many") %>% 
+  left_join(cmasPerformance, by = join_by(personId)) 
+
+  
