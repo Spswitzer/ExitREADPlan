@@ -36,7 +36,14 @@ qrystudentPlan <- odbc::dbGetQuery(con,
    ,tGoalInstruction.ActiveFlag AS goalInstFlag -- Not sure what this indicates
    ,tNeedType.ActiveFlag AS needFlag -- Not sure what this indicates
    ,tStudentNeedFocusArea.ActiveFlag AS focusAreaFlag -- Not sure what this indicates
+   ,tInstruction.ActiveFlag AS InstFlag -- Not sure what this indicates
+   ,tGoal.ActiveFlag AS GoalFlag -- Not sure what this indicates
+   ,tFocusAreaDesignator.ActiveFlag AS FocusFlag -- Not sure what this indicates
+   ,tGoalInstruction.ActiveFlag AS goalInstFlag -- Not sure what this indicates
+   ,tNeedType.ActiveFlag AS needFlag -- Not sure what this indicates
+   ,tStudentNeedFocusArea.ActiveFlag AS focusAreaFlag -- Not sure what this indicates
    ,tStudentNeedFocusArea.StudentNeedFocusAreaID
+   ,tFocusArea.FocusAreaName
    ,tFocusArea.FocusAreaName
   -- ,tGoal.SmartGoal
   -- ,tGoal.ProgressMonitoring --error: ODBC SQL Server Driver]Invalid Descriptor Index 
