@@ -272,53 +272,59 @@ SELECT
                               ")
 
 dibels6 <- qryOldDibels %>% 
-  clean_names('lower_camel') 
+  clean_names('lower_camel') %>% 
+  mutate(gender = case_when(
+    gender == 'Female' ~ 'F', 
+    gender == 'Male' ~ 'M', 
+    TRUE ~ 'U'
+  ))
 
 # Query Student Demograpics ----
-qryStuDemos <- odbc::dbGetQuery(con, 
-                                "
-SELECT
-  StudentDemographic.StudentNumber
-  ,StudentDemographic.PersonID
-  ,studentdemographic.[READ]
-  ,StudentDemographic.READStatus
-  ,Enrollment.Grade
-  ,Enrollment.CDESchoolNumber
-  ,Enrollment.CampusSchoolName
-  ,Enrollment.EnrollmentStartDate
-  ,Enrollment.EnrollmentEndDate
-  ,StudentDemographic.RecordStartDate
-  ,StudentDemographic.RecordEndDate
-  ,SchoolYear.endyear     
-FROM 
-  AchievementDW.dim.Enrollment (NOLOCK)
-JOIN 
-  AchievementDW.dim.StudentDemographic (NOLOCK) ON Enrollment.PersonID = StudentDemographic.PersonID
-  	AND (StudentDemographic.RecordEndDate BETWEEN Enrollment.EnrollmentstartDate AND Enrollment.EnrollmentEndDate
-		OR StudentDemographic.RecordEndDate = '9999-12-31 23:59:59.9999999')
---WHERE '05-26-2023' BETWEEN Enrollment.EnrollmentStartDate AND Enrollment.EnrollmentEndDate
---AND '05-01-2023' BETWEEN StudentDemographic.RecordStartDate AND StudentDemographic.RecordEndDate
-  AND Enrollment.IsInvalid = 0
-  AND StudentDemographic.IsInvalid = 0
-  AND Enrollment.DeletedInCampus = 0
-  AND Enrollment.LatestRecord = 1
-  AND Enrollment.EnrollmentType = 'Primary'
-  --AND StudentDemographic.StudentNumber = '2057918'
-"
-)
-
-studentDemos <- qryStuDemos %>% 
-  mutate(EnrollmentStartDate = as.Date(EnrollmentStartDate), 
-         EnrollmentEndDate = as.Date(EnrollmentEndDate), 
-         startDate = day(EnrollmentStartDate), 
-         startMonth = month(EnrollmentStartDate), 
-         startYear = year(EnrollmentStartDate), 
-         endDate = day(EnrollmentEndDate), 
-         endMonth = month(EnrollmentEndDate), 
-         endYear = year(EnrollmentEndDate)) %>% 
-  filter(startYear == 2023, 
-         str_detect(READStatus, 'Exit')) %>% 
-  distinct(PersonID, .keep_all = T)
+# It is challenging to pull READ Plan status from Enrollment. Need to careful set filters for enrollment and record dates, depending on inquiry
+# qryStuDemos <- odbc::dbGetQuery(con, 
+#                                 "
+# SELECT
+#   StudentDemographic.StudentNumber
+#   ,StudentDemographic.PersonID
+#   ,studentdemographic.[READ]
+#   ,StudentDemographic.READStatus
+#   ,Enrollment.Grade
+#   ,Enrollment.CDESchoolNumber
+#   ,Enrollment.CampusSchoolName
+#   ,Enrollment.EnrollmentStartDate
+#   ,Enrollment.EnrollmentEndDate
+#   ,StudentDemographic.RecordStartDate
+#   ,StudentDemographic.RecordEndDate
+#   ,SchoolYear.endyear     
+# FROM 
+#   AchievementDW.dim.Enrollment (NOLOCK)
+# JOIN 
+#   AchievementDW.dim.StudentDemographic (NOLOCK) ON Enrollment.PersonID = StudentDemographic.PersonID
+#   	AND (StudentDemographic.RecordEndDate BETWEEN Enrollment.EnrollmentstartDate AND Enrollment.EnrollmentEndDate
+# 		OR StudentDemographic.RecordEndDate = '9999-12-31 23:59:59.9999999')
+# --WHERE '05-26-2023' BETWEEN Enrollment.EnrollmentStartDate AND Enrollment.EnrollmentEndDate
+# --AND '05-01-2023' BETWEEN StudentDemographic.RecordStartDate AND StudentDemographic.RecordEndDate
+#   AND Enrollment.IsInvalid = 0
+#   AND StudentDemographic.IsInvalid = 0
+#   AND Enrollment.DeletedInCampus = 0
+#   AND Enrollment.LatestRecord = 1
+#   AND Enrollment.EnrollmentType = 'Primary'
+#   --AND StudentDemographic.StudentNumber = '2057918'
+# "
+# )
+# 
+# studentDemos <- qryStuDemos %>% 
+#   mutate(EnrollmentStartDate = as.Date(EnrollmentStartDate), 
+#          EnrollmentEndDate = as.Date(EnrollmentEndDate), 
+#          startDate = day(EnrollmentStartDate), 
+#          startMonth = month(EnrollmentStartDate), 
+#          startYear = year(EnrollmentStartDate), 
+#          endDate = day(EnrollmentEndDate), 
+#          endMonth = month(EnrollmentEndDate), 
+#          endYear = year(EnrollmentEndDate)) %>% 
+#   filter(startYear == 2023, 
+#          str_detect(READStatus, 'Exit')) %>% 
+#   distinct(PersonID, .keep_all = T)
 
 # Query to CMAS results ----
 qryCmas <- dbGetQuery(con, 
@@ -391,7 +397,7 @@ cmasPerformance <- qryCmas %>%
 cmasWithRead <- cmasPerformance %>% 
   right_join(flagWider, join_by(personId == personID)) %>% 
   mutate(n = n_distinct(personId)) %>% 
-  group_by(proficiencyLongDescription) %>% 
+  group_by(cmasProfLevel) %>% 
   mutate(profN = n(), 
          profPct = profN/n) 
   
@@ -399,8 +405,7 @@ cmasWithRead <- cmasPerformance %>%
 cmasNoScore <- cmasPerformance %>% 
   full_join(flagWider, join_by(personId == personID)) %>% 
   mutate(n = n_distinct(personId)) %>% 
-  filter(is.na(proficiencyLongDescription)) %>% 
-  group_by(readStatus) %>% 
+  filter(is.na(cmasProfLevel)) %>% 
   mutate(readPlanN = n()) 
 
 dibelsCombined <- dibels8Grade3 %>% 
@@ -413,6 +418,52 @@ dibelsWithFlag <-  dibelsCombined %>%
                      endYear == EndYear, 
                      gradeId == gradeInt), 
              relationship = "many-to-many") %>% 
-  left_join(cmasPerformance, by = join_by(personId)) 
+  left_join(cmasPerformance, by = join_by(personId)) %>% 
+  filter(planEnd == 'Exit plan') %>% 
+  mutate(planLength =  planEndDate- PlanStartDate) %>% 
+  mutate(meanPlanLength = mean(planLength))
 
+  flagGrade3 <- flagStart %>% 
+    filter(gradeInt == 3, 
+           EndYear == 2024, 
+           !is.na(planEnd)) %>% 
+    distinct(personID)
   
+    grade3ExitedCMAS <- flagGrade3 %>% 
+    ungroup() %>% 
+    left_join(cmasPerformance, join_by(personID == personId)) %>% 
+    filter(!is.na(cmasProfLevel)) %>% 
+    distinct(personID, cmasProfLevel) %>% 
+    mutate(totalN = n()) %>% 
+    group_by(cmasProfLevel) %>% 
+    reframe(groupN = n(), 
+            totalN = first(totalN),
+            groupPct = round(groupN/totalN,4)) %>% 
+      mutate(cmasProfLevel = str_remove(cmasProfLevel, ' Expectations')) %>% 
+      mutate(cmasProfLevel = factor(cmasProfLevel, 
+                                    levels= c('Exceeded', 
+                                              'Met', 
+                                              'Approached', 
+                                              'Partially Met', 
+                                              'Did Not Yet Meet')))
+
+    
+    ggplot(data = grade3ExitedCMAS, 
+           mapping = aes(x = totalN, 
+                         y = groupPct, 
+                         fill = cmasProfLevel))+
+      geom_bar(stat= 'identity', 
+               position = 'stack') +
+      geom_label(aes(label = paste0(groupN, '-', scales::percent(groupPct, 2))), 
+                position = position_stack(vjust = 0.5), 
+                size = 5,
+                show.legend = F
+                ) +
+      labs(title = 'CMAS Performace', 
+           subtitle = 'Grade 3 in 2024') +
+      theme_minimal() +
+      theme(axis.title = element_blank(), 
+            axis.text = element_blank(), 
+            legend.position = 'top', 
+            legend.title = element_blank())
+    
