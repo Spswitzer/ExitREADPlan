@@ -81,10 +81,16 @@ flagStart <- qryFlags %>%
     gradeInt == 3 & EndYear == 2024 ~ 'Y', 
     TRUE ~ NA
   )) %>% 
-  filter(EndYear > 2020) %>% 
+  # filter(EndYear > 2020) %>% 
   group_by(personID) %>% 
   fill(grade3In24, .direction = 'up') %>% 
-  filter(grade3In24 == 'Y')
+  filter(grade3In24 == 'Y') %>% 
+  mutate(jeffcoPk = case_when(
+    Grade =='PK' | Grade == 'It' ~ 'Y',
+    TRUE ~ NA
+  )) %>% 
+  arrange(personID, EnrollmentStartDate) %>% 
+  fill(jeffcoPk, .direction = 'down')
 
 ## Transform data into long format to add in summarizing ----
 flagLonger <- flagStart %>% 
@@ -267,7 +273,7 @@ SELECT
   FROM dbSoars.acadience.vAcadienceStudentListPre2022
    LEFT JOIN AchievementDW.dim.StudentDemographic WITH (NOLOCK) ON vAcadienceStudentListPre2022.PersonID = StudentDemographic.PersonID
   WHERE  vAcadienceStudentListPre2022.StandardLevelName = 'Overall'
-  AND vAcadienceStudentListPre2022.EndYear = 2021
+  AND vAcadienceStudentListPre2022.EndYear > 2019
   AND vAcadienceStudentListPre2022.GradeID = 0
                               ")
 
@@ -391,7 +397,8 @@ cmasPerformance <- qryCmas %>%
   clean_names('lower_camel') %>% 
   filter(contentGroupName == 'READING', 
          grade == '3', 
-         endYear == 2024) %>% 
+         endYear == 2024, 
+         !is.na(proficiencyLongDescription)) %>% 
   select(personId, grade, cmasProfLevel = proficiencyLongDescription, testName)
 
 cmasWithRead <- cmasPerformance %>% 
@@ -401,69 +408,271 @@ cmasWithRead <- cmasPerformance %>%
   mutate(profN = n(), 
          profPct = profN/n) 
   
-
+## Explore the CMAS performance levels of students from cohort alongside their READ Plan info ----
 cmasNoScore <- cmasPerformance %>% 
   full_join(flagWider, join_by(personId == personID)) %>% 
   mutate(n = n_distinct(personId)) %>% 
   filter(is.na(cmasProfLevel)) %>% 
-  mutate(readPlanN = n()) 
+  mutate(readPlanN = n())
 
+### Plot summary of CMAS performance for exited students ----
+flagGrade3 <- flagStart %>% 
+  filter(gradeInt == 3, 
+         EndYear == 2024, 
+         is.na(planEnd)) %>% 
+  distinct(personID)
+
+grade3ExitedCMAS <- flagGrade3 %>% 
+  ungroup() %>% 
+  left_join(cmasPerformance, join_by(personID == personId)) %>% 
+  filter(!is.na(cmasProfLevel)) %>% 
+  distinct(personID, cmasProfLevel) %>% 
+  mutate(totalN = n()) %>% 
+  group_by(cmasProfLevel) %>% 
+  reframe(groupN = n(), 
+          totalN = first(totalN),
+          groupPct = round(groupN/totalN,4)) %>% 
+  mutate(cmasProfLevel = str_remove(cmasProfLevel, ' Expectations')) %>% 
+  mutate(cmasProfLevel = factor(cmasProfLevel, 
+                                levels= c('Exceeded', 
+                                          'Met', 
+                                          'Approached', 
+                                          'Partially Met', 
+                                          'Did Not Yet Meet')))
+
+ggplot(data = grade3ExitedCMAS, 
+       mapping = aes(x = totalN, 
+                     y = groupPct, 
+                     fill = cmasProfLevel))+
+  geom_bar(stat= 'identity', 
+           position = 'stack') +
+  geom_label(aes(label = paste0(groupN, '-', scales::percent(groupPct, 2))), 
+             position = position_stack(vjust = 0.5), 
+             size = 5,
+             show.legend = F
+  ) +
+  labs(title = 'CMAS Performace', 
+       subtitle = 'Grade 3 in 2024') +
+  theme_minimal() +
+  theme(axis.title = element_blank(), 
+        axis.text = element_blank(), 
+        legend.position = 'top', 
+        legend.title = element_blank())
+
+## Explore the DIBELS performance levels of students from cohort alongside their READ Plan info ----
 dibelsCombined <- dibels8Grade3 %>% 
   full_join(dibels6) %>% 
-  full_join(dibelsNext) 
+  full_join(dibelsNext)  %>% 
+  arrange(personId, studentTestDate) %>% 
+  filter(gradeId %in% 0:3) %>% 
+  mutate(studentTestDate = as.Date(studentTestDate), 
+         studentTestDate = ymd(studentTestDate)) %>% 
+  group_by(personId) %>% 
+  filter(studentTestDate == max(studentTestDate, na.rm = T)) %>%
+  filter(contentname == 'READING')
+
+flagStartFilledFlag <- flagStart %>% 
+  fill(planEnd, .direction = 'down')
 
 dibelsWithFlag <-  dibelsCombined %>% 
-  right_join(flagStart, 
+  inner_join(flagStartFilledFlag, 
              join_by(personId == personID, 
                      endYear == EndYear, 
                      gradeId == gradeInt), 
              relationship = "many-to-many") %>% 
-  left_join(cmasPerformance, by = join_by(personId)) %>% 
-  filter(planEnd == 'Exit plan') %>% 
-  mutate(planLength =  planEndDate- PlanStartDate) %>% 
-  mutate(meanPlanLength = mean(planLength))
+  # filter(personId == 1557545) %>%
+  inner_join(cmasPerformance, by = join_by(personId)) %>%
+  # filter(!is.na(planEnd)) %>%
+  mutate(planEnd = replace_na(planEnd, "No exit by end of grade 3")) %>% 
+  group_by(personId) %>% 
+  mutate(planEndDate = replace_na(planEndDate, as.Date("2024-05-24"))) %>% 
+  mutate(studentPlanLength = planEndDate - PlanStartDate) %>% 
+  ungroup() %>% 
+  mutate(meanPlanLength = round(mean(studentPlanLength, na.rm = T))) %>% 
+  filter(testName == 'CMAS ELA Grade 03 2023-24') %>% 
+  group_by(cmasProfLevel, planEnd) %>% 
+  mutate(cmasPlanLength = round(mean(studentPlanLength, na.rm = T)))
 
-  flagGrade3 <- flagStart %>% 
-    filter(gradeInt == 3, 
-           EndYear == 2024, 
-           !is.na(planEnd)) %>% 
-    distinct(personID)
+#Load Demographics Lookup Tables ----
+    frlLookup <- data.frame(
+      stringsAsFactors = FALSE,
+      frlstatus = c("No FRL", "Reduced Lunch", "Free Lunch"),
+      frlBin = c(0L, 1L, 1L),
+      frlLabels = c("Not Free or Reduced Lunch",
+                 "Free or Reduced Lunch Eligible",
+                 "Free or Reduced Lunch Eligible")
+    )
+    
+    gtLookup <- data.frame(
+      stringsAsFactors = FALSE,
+      gt = c("GT", "Not GT"),
+      gtBin = c(1L, 0L),
+      gtLabels = c("GT", "Not GT")
+    )
+    
+    iepLookup <- data.frame(
+      stringsAsFactors = FALSE,
+      iep = c("No IEP", "Exited IEP", "IEP"),
+      iepBin = c(0L, 0L, 1L),
+      iepLabels = c("No IEP", "No IEP", "IEP")
+    )
+    
+    mlLookup <- data.frame(
+      stringsAsFactors = FALSE,
+      calculatedlanguageproficiency = c("Not ELL",
+                                        "NEP",
+                                        "LEP",
+                                        "FEP M1",
+                                        "FEP M2",
+                                        "FEP T3+",
+                                        "FELL",
+                                        # "PHLOTE",
+                                        "Prior to Feb 2013","FEP E1",
+                                        "FEP E2"),
+      mlBin = c(0L,1L,1L,
+                 1L,1L,1L,0L,
+                 # NA,
+                 0L,1L,
+                 1L),
+      mlLabels = c("Not ML",
+                 "Multilingual Learner",
+                 "Multilingual Learner",
+                 "Multilingual Learner",
+                 "Multilingual Learner",
+                 "Multilingual Learner",
+                 "Not ML",
+                 "Not ML",
+                 # "Not ELL",
+                 "Multilingual Learner",
+                 "Multilingual Learner")
+    )
+    
+    raceLookup <-data.frame(
+      stringsAsFactors = FALSE,
+      ethnicity = c("White","Hispanic","Multi",
+                    "Asian","Black","Am. Indian","Pacific Islander"),
+      raceBin = c(0L, 1L, 1L, 1L, 1L, 1L, 1L),
+      raceLabels = c("White Students",
+                 "Students of Color or Hispanic","Students of Color or Hispanic",
+                 "Students of Color or Hispanic","Students of Color or Hispanic",
+                 "Students of Color or Hispanic","Students of Color or Hispanic")
+    )
+    
+## Create binary values for demographic variables ----
+  allEoy2024Data <- dibelsWithFlag %>% 
+    full_join(raceLookup) %>% 
+    full_join(mlLookup) %>% 
+    full_join(iepLookup) %>% 
+    full_join(frlLookup) %>% 
+    full_join(gtLookup) %>% 
+    filter(!is.na(personId))
+    
+### Summarize plan length by student group
+  allEoyLong <- allEoy2024Data %>% 
+    pivot_longer(cols = c(raceLabels, mlLabels, iepLabels, frlLabels, gtLabels), 
+                 names_to = 'category', 
+                 values_to = 'categoryValue') %>% 
+      group_by(category, categoryValue, planEnd) %>% 
+    summarize(categoryPlanLength = round(mean(studentPlanLength))) %>% 
+    group_by(category, planEnd)  #planEnd
+  # %>% 
+  #   mutate(diff = categoryPlanLength -lag(categoryPlanLength))
+    
   
-    grade3ExitedCMAS <- flagGrade3 %>% 
+  ### Summarize student groups by exit status ----
+  
+  allEoyGroupSummary <- allEoy2024Data %>% 
+    pivot_longer(cols = c(raceBin, mlBin, iepBin, frlBin, gtBin), 
+                 names_to = 'category', 
+                 values_to = 'categoryValue') %>% 
     ungroup() %>% 
-    left_join(cmasPerformance, join_by(personID == personId)) %>% 
-    filter(!is.na(cmasProfLevel)) %>% 
-    distinct(personID, cmasProfLevel) %>% 
-    mutate(totalN = n()) %>% 
-    group_by(cmasProfLevel) %>% 
-    reframe(groupN = n(), 
-            totalN = first(totalN),
-            groupPct = round(groupN/totalN,4)) %>% 
-      mutate(cmasProfLevel = str_remove(cmasProfLevel, ' Expectations')) %>% 
-      mutate(cmasProfLevel = factor(cmasProfLevel, 
-                                    levels= c('Exceeded', 
-                                              'Met', 
-                                              'Approached', 
-                                              'Partially Met', 
-                                              'Did Not Yet Meet')))
-
+    mutate(n = n_distinct(personId)) %>% 
+    group_by(planEnd) %>% 
+    mutate(planN = n_distinct(personId)) %>% 
+    group_by(category, categoryValue, planEnd) %>% 
+    summarise(n = first(n), 
+              planN = first(planN),
+              groupN = n(), 
+              groupPct = groupN/planN) %>% 
+    filter(categoryValue == 1)
     
-    ggplot(data = grade3ExitedCMAS, 
-           mapping = aes(x = totalN, 
-                         y = groupPct, 
-                         fill = cmasProfLevel))+
-      geom_bar(stat= 'identity', 
-               position = 'stack') +
-      geom_label(aes(label = paste0(groupN, '-', scales::percent(groupPct, 2))), 
-                position = position_stack(vjust = 0.5), 
-                size = 5,
-                show.legend = F
-                ) +
-      labs(title = 'CMAS Performace', 
-           subtitle = 'Grade 3 in 2024') +
-      theme_minimal() +
-      theme(axis.title = element_blank(), 
-            axis.text = element_blank(), 
-            legend.position = 'top', 
-            legend.title = element_blank())
-    
+# Understand student enrollment history ----
+  # Query of READ Plan Flag in Campus ----
+  qryFlagsEnrollmentOverTime <- odbc::dbGetQuery(con, 
+                               "
+SELECT
+V_ProgramParticipation.personID
+ ,Enrollment.Grade
+ ,Enrollment.CampusSchoolName
+ ,Enrollment.EnrollmentStartDate
+ ,Enrollment.EnrollmentEndDate
+ ,Enrollment.EndYear
+ ,Enrollment.CalendarName
+ ,Enrollment.EnrollmentType
+FROM 
+  Jeffco_IC.dbo.V_ProgramParticipation (NOLOCK)
+JOIN AchievementDW.dim.Enrollment (NOLOCK) ON 
+  Enrollment.PersonID = V_ProgramParticipation.PersonID
+WHERE
+ name = 'READ'
+AND
+  V_ProgramParticipation.active = 1
+AND 
+  Enrollment.DeletedInCampus = 0
+AND 
+  Enrollment.LatestRecord = 1
+"
+  )
+  
+  ### Transform query date fields ----
+  # filter to students of interest
+  flagWithEnrollment <- qryFlagsEnrollmentOverTime %>% 
+    mutate(startDate = as_date(EnrollmentStartDate), # format as date
+           endDate = as_date(EnrollmentEndDate),
+           EnrollmentStartDate = ymd(EnrollmentStartDate), 
+           EnrollmentEndDate = ymd(EnrollmentEndDate)) %>%  #create time interval) 
+    select(personID, Grade, CampusSchoolName, CalendarName, EnrollmentStartDate, EnrollmentEndDate,EnrollmentType, EndYear) %>%
+    filter(EnrollmentEndDate < '2024-06-30' | is.na(EnrollmentEndDate)) %>% #exclude enrollments in the 2025 school year
+    mutate(gradeInt = case_when(
+      Grade == 'K' ~ 0, 
+      Grade == 'PK' ~ -1, 
+      Grade == 'It' ~ -2, 
+      TRUE ~ as.numeric(Grade)
+    )) %>% # convert grade grade to numeric value to arrange/sort by
+    filter(gradeInt < 4) %>% 
+    arrange(personID, gradeInt, desc(EnrollmentStartDate), desc(EnrollmentEndDate)) %>% 
+    mutate(grade3In24 = case_when(
+      gradeInt == 3 & EndYear == 2024 ~ 'Y', 
+      TRUE ~ NA
+    )) %>% 
+    # filter(EndYear > 2020) %>% 
+    group_by(personID) %>% 
+    fill(grade3In24, .direction = 'up') %>% 
+    filter(grade3In24 == 'Y') %>% 
+    mutate(jeffcoPk = case_when(
+      Grade =='PK' | Grade == 'It' ~ 1,
+      TRUE ~ NA
+    )) %>% 
+    arrange(personID, EnrollmentStartDate) %>% 
+    fill(jeffcoPk, .direction = 'down') %>% 
+    mutate(enrollmentLength = EnrollmentEndDate -EnrollmentStartDate) %>% 
+    filter(enrollmentLength > 10) %>% 
+    mutate(jsel = str_detect(CalendarName, 'SEL')) %>% 
+    mutate(remoteKinder = case_when(
+      str_detect(CalendarName, 'RL') & EnrollmentType == 'Primary' & EndYear == 2021 ~ 1, 
+      TRUE ~ NA_real_)) %>% 
+    select(personID, Grade, gradeInt, CalendarName, EndYear, jeffcoPk, enrollmentLength, jsel, remoteKinder) %>% 
+    arrange(personID, desc(jeffcoPk)) %>% 
+    fill(jeffcoPk, .direction = 'down') %>% 
+    mutate(jsel = case_when(
+      jsel == FALSE ~ NA_real_, 
+      TRUE ~ 1
+    )) %>% 
+    arrange(personID, desc(jsel)) %>% 
+    fill(jsel, .direction = 'down') %>% 
+    arrange(personID, desc(remoteKinder)) %>% 
+    fill(remoteKinder, .direction = 'down') %>% 
+    group_by(personID, jeffcoPk, jsel, remoteKinder) %>% 
+    summarise()
+  
+  
