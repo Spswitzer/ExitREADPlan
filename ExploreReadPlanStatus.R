@@ -84,14 +84,7 @@ flagStart <- qryFlags %>%
   # filter(EndYear > 2020) %>% 
   group_by(personID) %>% 
   fill(grade3In24, .direction = 'up') %>% 
-  filter(grade3In24 == 'Y') %>% 
-  mutate(jeffcoPk = case_when(
-    Grade =='PK' | Grade == 'It' ~ 'Y',
-    TRUE ~ NA
-  )) %>% 
-  arrange(personID, EnrollmentStartDate) %>% 
-  fill(jeffcoPk, .direction = 'down')
-
+  filter(grade3In24 == 'Y')
 ## Transform data into long format to add in summarizing ----
 flagLonger <- flagStart %>% 
   select(personID, Grade, planStart, planEnd) %>% 
@@ -673,6 +666,32 @@ AND
     arrange(personID, desc(remoteKinder)) %>% 
     fill(remoteKinder, .direction = 'down') %>% 
     group_by(personID, jeffcoPk, jsel, remoteKinder) %>% 
-    summarise()
+    summarise() %>% 
+    pivot_longer(cols = jeffcoPk:remoteKinder, 
+                 names_to = 'program', 
+                 values_to = 'programValue') %>% 
+    
   
+  ### Summarize plan length by student group
+  allEoyDemos <- allEoy2024Data %>% 
+    pivot_longer(cols = c(raceLabels, mlLabels, iepLabels, frlLabels, gtLabels), 
+                 names_to = 'category', 
+                 values_to = 'categoryValue') %>% 
+    ungroup() %>% 
+    select(personId, planEnd)
+  
+  allDemosPrograms <- allEoyDemos %>% 
+    left_join(flagWithEnrollment, 
+               join_by(personId == personID), 
+               relationship = "many-to-many") %>% 
+    ungroup() %>% 
+    mutate(n = n_distinct(personId)) %>% 
+    group_by(planEnd) %>% 
+    mutate(planN = n_distinct(personId)) %>% 
+    group_by(program, programValue, planEnd) %>% 
+    summarise(n = first(n), 
+              planN = first(planN),
+              groupN = n_distinct(personId), 
+              groupPct = groupN/planN) %>% 
+    filter(programValue == 1)
   
