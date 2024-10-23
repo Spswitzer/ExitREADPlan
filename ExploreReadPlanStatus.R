@@ -590,7 +590,7 @@ dibelsWithFlag <-  dibelsCombined %>%
     filter(categoryValue == 1)
     
 # Understand student enrollment history ----
-  # Query of READ Plan Flag in Campus ----
+  ## Query of enrollments in Campus ----
   qryFlagsEnrollmentOverTime <- odbc::dbGetQuery(con, 
                                "
 SELECT
