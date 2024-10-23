@@ -20,9 +20,10 @@ con <- dbConnect(odbc(),
 sort(unique(odbcListDrivers()[[1]]))
 
 # Query of READ Plan Flag in Campus ----
+# Need Progress Monitoring Result ----
 qrystudentPlan <- odbc::dbGetQuery(con, 
 "
-  SELECT DISTINCT
+  SELECT
    tStudentNeed.studentNeedID
    ,tStudentNeed.FirstName
    ,tStudentNeed.LastName
@@ -55,6 +56,12 @@ qrystudentPlan <- odbc::dbGetQuery(con,
   ,tInstruction.InstructionMinutes
   ,tInstruction.TimesPerWeek
    --,tFocusAreaDesignator.DesignatorID
+   ,tGoal.GoalStartDate
+   ,tGoal.GoalEndDate
+   ,tGoal.GoalID
+   ,tProgress.ProgressResultNameID
+   ,tProgress.ActiveFlag AS progressActiveFlag
+   ,tProgressResult.ActiveFlag AS progressResultActiveFlag
    ,tGoal.SmartGoal --must be at end of query
 FROM
     dbSOARS.rti.tStudentNeed (NOLOCK)
@@ -70,6 +77,10 @@ FROM
     tGoalInstruction.GoalID = tGoal.GoalID
   JOIN dbSOARS.rti.tGoalFocusArea (NOLOCK) ON
     tGoalFocusArea.GoalID = tGoal.GoalID
+  JOIN dbSOARS.rti.tProgress(NOLOCK) ON
+    tProgress.GoalID = tGoal.GoalID
+  JOIN dbSOARS.rti.tProgressResult (NOLOCK) ON
+    tProgressResult.ProgressResultNameID = tProgress.ProgressResultNameID
   JOIN dbSoARS.rti.tInstruction (NOLOCK) ON
     tInstruction.InstructionID = tGoalInstruction.InstructionID AND
      tInstruction.studentNeedID = tStudentNeed.studentNeedID
@@ -83,10 +94,42 @@ WHERE
     tstudentNeed.ConcernStartDate < '2024-07-01'
   AND 
     tStudentNeed.ActiveFlag = 1
- -- AND 
-    --tStudentNeed.PersonID = 1647360
+ AND 
+    tStudentNeed.PersonID = 2241269
   ORDER BY
     tStudentNeed.ConcernStartDate
 "
 )
 
+# Query of READ Plan Flag in Campus ----
+qrystudentGoal <- odbc::dbGetQuery(con, 
+                                   "
+  SELECT 
+    ProgressMonitoring
+    ,studentNeedID
+    ,tGoal.GoalStartDate
+   ,tGoal.GoalEndDate
+  FROM
+    dbSOARS.rti.tGoal (NOLOCK)
+  WHERE
+    studentNeedID = 225291
+  "
+)
+
+qryPM <-  odbc::dbGetQuery(con, 
+                           "
+                           SELECT
+                           *
+                           FROM
+                           JOIN dbSOARS.rti.tProgress(NOLOCK) ON
+                           tProgress.GoalID = tGoal.GoalID
+                          JOIN dbSOARS.rti.tProgressResult (NOLOCK) ON
+                            tProgressResult.ProgressResultNameID = tProgress.ProgressResultNameID
+                           ")
+
+completeRecord <- qrystudentPlan %>% 
+  left_join(qrystudentGoal, 
+            join_by(studentNeedID, 
+                    GoalStartDate, 
+                    GoalEndDate),
+            relationship = "many-to-many")
