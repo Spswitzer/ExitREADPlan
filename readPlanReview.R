@@ -33,14 +33,16 @@ qrystudentPlan <- odbc::dbGetQuery(con,
    --,tStudentNeed.NeedDescription --empty
    --,tStudentNeed.isDisplayedStaffDashboard --FALSE for sample student
    --,tStudentNeed.isDisplayedStudentParentDashboard  --FALSE for sample student
-   ,tStudentNeed.ActiveFlag -- Not sure what this indicates
-   ,tInstruction.ActiveFlag AS InstFlag -- Not sure what this indicates
-   ,tGoal.ActiveFlag AS GoalFlag -- Not sure what this indicates
-   ,tFocusAreaDesignator.ActiveFlag AS FocusFlag -- Not sure what this indicates
+   ,tStudentNeed.ActiveFlag AS needFlag-- Not sure what this indicates
+   ,tInstruction.ActiveFlag AS instFlag -- Not sure what this indicates
+   ,tGoal.ActiveFlag AS goalFlag -- Not sure what this indicates
+   ,tFocusAreaDesignator.ActiveFlag AS focusFlag -- Not sure what this indicates
    ,tGoalInstruction.ActiveFlag AS goalInstFlag -- Not sure what this indicates
-   ,tNeedType.ActiveFlag AS needFlag -- Not sure what this indicates
+   ,tNeedType.ActiveFlag AS needTypeFlag -- Not sure what this indicates
    ,tStudentNeedFocusArea.ActiveFlag AS focusAreaFlag -- Not sure what this indicates
-   ,tStudentNeedFocusArea.StudentNeedFocusAreaID
+   ,tProgress.ActiveFlag AS progressActiveFlag -- Not sure what this indicates
+   ,tProgressResult.ActiveFlag AS progressResultActiveFlag -- Not sure what this indicates
+   ,tStudentNeedFocusArea.StudentNeedFocusAreaID --Not using this
    ,tFocusArea.FocusAreaName
    --,tFocusArea.StartYear --Not working 1900
    --,tFocusArea.EndYear --Not working 2099
@@ -48,8 +50,8 @@ qrystudentPlan <- odbc::dbGetQuery(con,
    -- ,tGoal.ProgressMonitoring --error: ODBC SQL Server Driver]Invalid Descriptor Index 
    ,tStudentNeedFocusArea.FocusAreaID
    --,tStudentNeedFocusArea.FocusAreaRanking
-   ,tStudentNeedFocusArea.StartDate AS SNStart
-   ,tStudentNeedFocusArea.EndDate AS SNEnd
+   ,tStudentNeedFocusArea.StartDate AS studentNeedStart
+   ,tStudentNeedFocusArea.EndDate AS studentNeedEnd
    ,tInstruction.InstructionDescription
   ,tInstruction.ImplementedDate
   ,tInstruction.CompletedDate
@@ -60,8 +62,9 @@ qrystudentPlan <- odbc::dbGetQuery(con,
    ,tGoal.GoalEndDate
    ,tGoal.GoalID
    ,tProgress.ProgressResultNameID
-   ,tProgress.ActiveFlag AS progressActiveFlag
-   ,tProgressResult.ActiveFlag AS progressResultActiveFlag
+   ,tProgress.ProgressDate
+   ,tProgress.LastUpdatedDate AS prgressLastUpdate
+   ,tProgressResult.ProgressValue
    ,tGoal.SmartGoal --must be at end of query
 FROM
     dbSOARS.rti.tStudentNeed (NOLOCK)
@@ -69,7 +72,7 @@ FROM
     tStudentNeedFocusArea.StudentNeedID = tStudentNeed.StudentNeedID
   JOIN dbSOARS.rti.tGoal (NOLOCK) ON
     tGoal.StudentNeedID = tStudentNeed.StudentNeedID
- JOIN dbSOARS.rti.tNeedType (NOLOCK) ON
+  JOIN dbSOARS.rti.tNeedType (NOLOCK) ON
    tNeedType.NeedTypeID = tStudentNeed.NeedTypeID
   JOIN dbSOARS.rti.tFocusArea (NOLOCK) ON
    tFocusArea.FocusAreaID = tStudentNeedFocusArea.FocusAreaID
@@ -94,8 +97,14 @@ WHERE
     tstudentNeed.ConcernStartDate < '2024-07-01'
   AND 
     tStudentNeed.ActiveFlag = 1
- AND 
-    tStudentNeed.PersonID = 2241269
+  AND 
+  tStudentNeed.studentNeedID = 225291
+ --AND 
+ --  tStudentNeed.PersonID = 2241269
+ -- AND
+  -- tProgress.GoalID = 756463
+  --AND
+  --  StudentNeedFocusAreaID = 459840
   ORDER BY
     tStudentNeed.ConcernStartDate
 "
@@ -115,17 +124,6 @@ qrystudentGoal <- odbc::dbGetQuery(con,
     studentNeedID = 225291
   "
 )
-
-qryPM <-  odbc::dbGetQuery(con, 
-                           "
-                           SELECT
-                           *
-                           FROM
-                           JOIN dbSOARS.rti.tProgress(NOLOCK) ON
-                           tProgress.GoalID = tGoal.GoalID
-                          JOIN dbSOARS.rti.tProgressResult (NOLOCK) ON
-                            tProgressResult.ProgressResultNameID = tProgress.ProgressResultNameID
-                           ")
 
 completeRecord <- qrystudentPlan %>% 
   left_join(qrystudentGoal, 
