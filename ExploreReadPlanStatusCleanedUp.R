@@ -1,0 +1,1143 @@
+# # Script header ----
+# Title: READ Plan Flags
+# Author: Susan Switzer
+# Created: 10/08/24
+# Revised: 10/24/24
+# The purpose of this script is to determine which 3rd students (2023-2024) from the kindergarten class of 2020-2021 had a READ plan at any time and when/if they exited the plan
+
+#load libraries ----
+library(gt)
+library(odbc)
+library(DBI)
+library(janitor)
+library(tidyverse)
+# connect to SQL database ----
+con <- dbConnect(odbc(),
+                 Driver = "SQL Server",
+                 Server = "qdc-soars-test",
+                 trusted_connection = "true",
+                 Port = 1433)
+
+sort(unique(odbcListDrivers()[[1]]))
+
+# Query of READ Plan Flag in Campus ----
+qryFlags <- odbc::dbGetQuery(con, 
+                                "
+SELECT
+ V_ProgramParticipation.name
+ ,V_ProgramParticipation.personID
+ ,V_ProgramParticipation.startDate
+ ,V_ProgramParticipation.endDate
+ ,Enrollment.Grade
+ ,Enrollment.CampusSchoolName
+ ,Enrollment.EnrollmentStartDate
+ ,Enrollment.EnrollmentEndDate
+ ,Enrollment.EndYear
+ ,Enrollment.CalendarName
+ ,Enrollment.EnrollmentType
+FROM 
+  Jeffco_IC.dbo.V_ProgramParticipation (NOLOCK)
+JOIN AchievementDW.dim.Enrollment (NOLOCK) ON 
+  Enrollment.PersonID = V_ProgramParticipation.PersonID
+WHERE
+ name = 'READ'
+--AND
+--V_ProgramParticipation.personID in (1523935,1522073, 1632653)
+AND
+  V_ProgramParticipation.active = 1
+AND 
+  Enrollment.DeletedInCampus = 0
+AND 
+  Enrollment.LatestRecord = 1
+--AND 
+ -- Enrollment.EnrollmentType = 'Primary'
+--AND 
+ -- endDate > '2024-01-01 00:00:00'
+"
+)
+
+### Transform query date fields ----
+# filter to students of interest
+flagStart <- qryFlags %>% 
+  mutate(startDate = as_date(startDate), # format as date
+         endDate = as_date(endDate),
+         PlanStartDate = ymd(startDate), # format as Year, Month, Day
+         planEndDate = ymd(endDate), 
+         EnrollmentStartDate = ymd(EnrollmentStartDate), 
+         EnrollmentEndDate = ymd(EnrollmentEndDate),
+         enrollmentInterval = interval(EnrollmentStartDate, EnrollmentEndDate), #create time interval
+         planStartInterval = PlanStartDate %within% enrollmentInterval, #determine if plan dates is within time interval
+         planEndInterval = planEndDate %within% enrollmentInterval,
+         planStart = ifelse(planStartInterval == TRUE, paste0(Grade, "- Start plan"), NA), #report if plan was started
+         planEnd = ifelse(planEndInterval == TRUE, paste0(Grade, "- Exit plan"), NA)) %>% #report if plan was ended
+  select(personID, Grade, CampusSchoolName, CalendarName, EnrollmentStartDate, PlanStartDate, planStart, EnrollmentEndDate, planEndDate, planEnd, EndYear, EnrollmentType) %>%
+  filter(EnrollmentEndDate < '2024-06-30' | is.na(EnrollmentEndDate)) %>% #exclude enrollments in the 2025 school year
+  mutate(gradeInt = case_when(
+    Grade == 'K' ~ 0, 
+    Grade == 'PK' ~ -1, 
+    Grade == 'It' ~ -2, 
+    TRUE ~ as.numeric(Grade)
+  )) %>% # convert grade grade to numeric value to arrange/sort by
+  filter(gradeInt < 4) %>% 
+  arrange(personID, gradeInt, desc(planStart), desc(planEnd)) %>% 
+  mutate(grade3In24 = case_when(
+    gradeInt == 3 & EndYear == 2024 ~ 'Y', 
+    TRUE ~ NA
+  )) %>% 
+  # filter(EndYear > 2020) %>% 
+  group_by(personID) %>% 
+  fill(grade3In24, .direction = 'up') %>% 
+  filter(grade3In24 == 'Y') %>% 
+  #calculate summer programming and PK
+  mutate(jeffcoPk = case_when(
+  str_detect(CalendarName, 'PK') & !str_detect(CalendarName, 'Child Find') ~ 1,
+  TRUE ~ NA_real_)) %>% 
+  arrange(personID, EnrollmentStartDate) %>% 
+  fill(jeffcoPk, .direction = 'down') %>% 
+  mutate(enrollmentLength = EnrollmentEndDate - EnrollmentStartDate) %>% 
+  filter(enrollmentLength > 10) %>% 
+  mutate(jsel = str_detect(CalendarName, 'SEL')) %>% 
+  mutate(remoteKinder = case_when(
+    str_detect(CalendarName, 'RL') & EnrollmentType == 'Primary' & EndYear == 2021 ~ 1, 
+    TRUE ~ NA_real_)) %>% 
+  arrange(personID, desc(jeffcoPk)) %>% 
+  fill(jeffcoPk, .direction = 'down') %>% 
+  mutate(jsel = case_when(
+    jsel == FALSE ~ NA_real_, 
+    TRUE ~ 1
+  )) %>% 
+  mutate(childFind = case_when(
+    str_detect(CalendarName, 'Child Find') ~ 1, 
+    TRUE ~ NA_real_
+  )) %>% 
+  arrange(personID, desc(jsel)) %>% 
+  fill(jsel, .direction = 'down') %>% 
+  arrange(personID, desc(remoteKinder)) %>% 
+  fill(remoteKinder, .direction = 'down') %>% 
+  arrange(personID, desc(childFind)) %>% 
+  fill(childFind, .direction = 'down') %>% 
+  filter(EnrollmentType == 'Primary')
+
+
+## Transform data into long format to add in summarizing ----
+flagLonger <- flagStart %>% 
+  select(personID, Grade, planStart, planEnd) %>% 
+  pivot_longer(c(planStart, planEnd), 
+               names_to = 'status') %>% 
+  filter(!is.na(value)) %>% 
+  select(-status)   
+
+## Summary table ----
+flagSummary <- flagStart %>% 
+  select(personID, planStart, planEnd) %>% 
+  mutate(planStart = str_remove(planStart, '- Start plan'), 
+         planEnd = str_remove(planEnd, '- Exit plan')) %>% 
+  pivot_longer(c(planStart, planEnd), 
+               names_to = 'status') %>% 
+  filter(!is.na(value)) %>% 
+  pivot_wider(names_from = status, 
+              values_from = value) %>% 
+  ungroup() %>% 
+  mutate(totalN = n()) %>% 
+  group_by(planStart) %>% 
+  mutate(planStartN = n_distinct(personID)) %>% 
+  group_by(planEnd) %>% 
+  mutate(planEndN = n_distinct(personID)) %>% 
+  group_by(planStart, planEnd) %>% 
+  summarise(startEndN = n(), 
+            planStartN = first(planStartN), 
+            planEndN = first(planEndN), 
+            planEndPct = startEndN/planStartN, 
+            totalN = first(totalN)) %>% 
+  mutate(planEnd = replace_na(planEnd, 'No End')) %>% 
+  filter(!is.na(planStart)) %>% 
+  mutate(planStart = factor(planStart, 
+                        levels = c('K', '1', '2', '3'), 
+                        labels = c('Kindergarten', '1st', '2nd', '3rd'), 
+                        ordered = T)) %>% 
+  mutate(planStartN = paste0(planStartN, ' Students started plan')) %>% 
+  group_by(planStart, planStartN) %>% 
+  mutate(planEnd = factor(planEnd, 
+                          levels = c('K', '1', '2', '3', 'No End'),
+                          labels = c('Kinder', '1st', '2nd', '3rd', 'No End'),
+                          ordered = T))
+  ## Create sumamry GT table ----
+gt(flagSummary) %>% 
+  cols_label(planEnd = 'Grade when Plan Ended', 
+             startEndN = 'Number of students', 
+             planEndPct = 'Percent') %>% 
+  row_group_order(groups = c('Kindergarten - 618 Students started plan', 
+                             '1st - 704 Students started plan', 
+                             '2nd - 321 Students started plan', 
+                             '3rd - 290 Students started plan')) %>% 
+  cols_width(
+    planEnd  ~ px(200), 
+    startEndN ~ px(200)) %>% 
+  cols_align(
+    align = c("left"),
+    columns = planEnd
+  ) %>% 
+  cols_align(
+    align = c("center"),
+    columns = c(startEndN, planEndPct)
+  ) %>% 
+  opt_table_outline() %>% 
+  tab_style(
+    cell_fill('grey'), 
+    cells_row_groups()
+    ) %>% 
+  cols_hide(
+    c(planEndN, totalN)
+    ) %>% 
+  fmt_percent(
+    planEndPct, 
+    decimals = 1
+    ) %>% 
+  fmt_number(
+    startEndN, 
+    decimals = 1
+  ) %>% 
+  tab_header(
+    title = 'Students who started and discontinued plan within by end of grade 3', 
+    subtitle = '2020-2021 Kindergarten Student Cohort (Grade 3 in 2023-2024)'
+    ) %>% 
+  tab_options(
+    table.font.size = 12
+    )
+
+##Summary By End Grade 3 plan exit results ----
+cohortSummary <- flagSummary %>% 
+  group_by(planEnd) %>% 
+  summarise(
+    totalN = first(totalN),
+    planEndN = first(planEndN),
+    planEndPct = planEndN/totalN)
+
+gt(cohortSummary) %>% 
+  cols_label(planEnd = 'Grade of Plan End', 
+             planEndN = 'Number of students', 
+             planEndPct = "Percent") %>% 
+  cols_align(
+    align = c("left"),
+    columns = planEnd
+  ) %>% 
+  cols_align(
+    align = c("center"),
+    columns = c(planEndN, planEndPct)
+  ) %>% 
+  opt_table_outline() %>% 
+  cols_hide(totalN) %>% 
+  fmt_percent(planEndPct, decimals = 1) %>% 
+  tab_header(
+    title = 'Students who started and discontinued plan within by end of grade 3', 
+    subtitle = '2020-2021 Kindergarten Student Cohort (Grade 3 in 2023-2024)'
+  ) 
+
+## Transform data into Wide forpersonID## Transform data into Wide format to add in summarizing ----
+flagWider <- flagLonger %>% 
+  pivot_wider(names_from = Grade, 
+              names_prefix = "Grade",
+              values_from = value, 
+              values_fn = list) %>% 
+  select(personID, GradeK, Grade1, Grade2, Grade3) %>%
+  mutate(across(GradeK:Grade3, ~replace(., lengths(.) == 0, NA))) %>% 
+  mutate(across(GradeK:Grade3, ~str_replace(., '^c(.*)$', 
+                                            'Start and Exit plan')))#clean up output
+
+# Query DIBELS8 ----
+# which only holds data from 2023-2024 +
+# some students repeated due to multiple tests for single window due to re-testing and testing in Spanish
+qryDibels8 <- odbc::dbGetQuery(con, "
+
+SELECT  studentdemographic.personid AS 'PersonID'
+      ,studentdemographic.frlstatus
+      ,studentdemographic.[readstatus]
+      ,studentdemographic.calculatedlanguageproficiency
+      ,studentdemographic.gt
+      ,studentdemographic.ethnicity
+      ,studentdemographic.Gender
+      ,studentdemographic.iep
+      ,studentdemographic.primarydisability
+      ,studentdemographic.programtype AS ELLProgram
+      ,ttest.gradeid AS 'GradeID'
+      ,trange.proficiencylongdescription  AS 'ProficiencyLongDescription'
+       ,ttesttype.testtypename AS testTypeName
+       ,CONVERT(DATE, CONVERT(VARCHAR(10), DIBELS8Benchmark.assessmentdatekey)) AS StudentTestDate
+       ,SchoolYear.endyear  AS EndYear
+       ,tcontent.contentname
+       ,ttestingperiod.testingperiodid AS testingPeriodNumeric
+       ,ttestingperiod.testingperiodname AS 'TestingPeriodName'
+       ,tcontentgroup.contentgroupname AS 'contentGroupName'
+       ,school.cdeschoolnumber AS cdeSchoolNumber
+       ,school.school AS schoolName
+       ,calendar.calendarname
+
+FROM   achievementdw.fact.DIBELS8Benchmark WITH (nolock)
+       JOIN achievementdw.dim.studentdemographic WITH (nolock)
+         ON studentdemographic.studentdemographickey =
+            DIBELS8Benchmark.studentdemographickey
+            AND studentdemographic.isinvalid = 0
+       JOIN achievementdw.dim.assessmentingredient WITH (nolock)
+         ON assessmentingredient.assessmentingredientkey =
+           DIBELS8Benchmark.assessmentingredientkey
+        JOIN achievementdw.dim.school WITH (nolock)
+         ON school.schoolkey = DIBELS8Benchmark.schoolkey
+       JOIN achievementdw.dim.calendar WITH (nolock)
+         ON calendar.calendarkey = DIBELS8Benchmark.calendarkey
+       JOIN dbsoars.uckie.ttesttestpart WITH (nolock)
+         ON ttesttestpart.testtestpartid = assessmentingredient.testtestpartid
+       JOIN dbsoars.uckie.ttestpart WITH (nolock)
+         ON ttestpart.testpartid = ttesttestpart.testpartid
+       JOIN dbsoars.uckie.tstandardlevel WITH (nolock)
+         ON tstandardlevel.standardlevelid = ttestpart.standardlevelid
+       JOIN dbsoars.uckie.ttest WITH (nolock)
+         ON ttest.testid = ttesttestpart.testid
+       JOIN dbsoars.uckie.ttestingperiod WITH (nolock)
+         ON ttestingperiod.testingperiodid = ttest.testingperiodid
+       JOIN dbsoars.uckie.ttesttype WITH (nolock)
+         ON ttesttype.testtypename = 'DIBELS 8'
+       JOIN dbsoars.uckie.ttestuse WITH (nolock)
+         ON ttestuse.testuseid = ttest.testuseid
+       JOIN dbsoars.dbo.tschoolyear SchoolYear WITH (nolock)
+         ON SchoolYear.schoolyearid = ttest.schoolyearid
+       JOIN dbsoars.uckie.tcontent WITH (nolock)
+         ON tcontent.contentid = ttestpart.contentid
+       JOIN dbsoars.uckie.tcontentgroup WITH (nolock)
+         ON tcontentgroup.contentgroupid = tcontent.contentgroupid
+       LEFT OUTER JOIN achievementdw.dim.assessmentscoringrange WITH (nolock)
+                    ON assessmentscoringrange.assessmentscoringrangekey =
+                       DIBELS8Benchmark.assessmentscoringrangekey
+      LEFT OUTER JOIN dbsoars.uckie.trange WITH (nolock)
+                    ON trange.rangeid = assessmentscoringrange.rangeid
+                       AND trange.rangetypeid = 1
+      LEFT OUTER JOIN dbsoars.uckie.tproficiency WITH (nolock)
+                    ON tproficiency.proficiencyid = trange.proficiencyid
+       LEFT OUTER JOIN dbsoars.uckie.tproficiencycolor WITH (nolock)
+                    ON tproficiencycolor.proficiencyid =
+                       tproficiency.proficiencyid
+                       AND tproficiencycolor.colortypenameid = 'DIBELS 8'
+       LEFT OUTER JOIN dbsoars.uckie.tcolor WITH (nolock)
+                    ON tcolor.colorid = tproficiencycolor.colorid
+       LEFT OUTER JOIN dbsoars.isr.tscoretypetesttype WITH (nolock)
+                    ON tscoretypetesttype.testtypeid = ttesttype.testtypeid
+                       AND tscoretypetesttype.usedonstudentprofile = 1
+       --  BOEScoreTypeColumnName IS NOT NULL
+       LEFT OUTER JOIN dbsoars.isr.tscoretype WITH (nolock)
+                    ON tscoretype.scoretypeid = tscoretypetesttype.scoretypeid
+WHERE  standardlevelname = 'Overall'
+")
+
+dibels8Grade3 <- qryDibels8 %>% 
+  filter(EndYear == 2024) %>% 
+  clean_names('lower_camel')
+
+# Query Acadience----
+# which only holds data from 2021-2022  & 2022-2023 
+qryAcadience <- odbc::dbGetQuery(con, "
+SELECT  
+      vAcadienceStudentList.PersonID
+      ,vAcadienceStudentList.FRLStatus AS 'frlstatus'
+      ,vAcadienceStudentList.READStatus AS 'readstatus'
+      ,vAcadienceStudentList.CalculatedLanguageProficiency AS 'calculatedlanguageproficiency'
+      ,vAcadienceStudentList.GT AS 'gt'
+      ,vAcadienceStudentList.Ethnicity AS 'ethnicity'
+      ,vAcadienceStudentList.Gender
+      ,vAcadienceStudentList.IEP AS 'iep'
+      ,vAcadienceStudentList.PrimaryDisability AS 'primarydisability'
+      ,vAcadienceStudentList.ProgramType AS 'ELLProgram'
+      ,vAcadienceStudentList.GradeID
+--  ,vAcadienceStudentList.ScaleScore
+      ,vAcadienceStudentList.ProficiencyLongDescription
+      ,vAcadienceStudentList.TestTypeName AS 'testTypeName'
+      ,vAcadienceStudentList.StudentTestDate 
+      ,vAcadienceStudentList.EndYear
+      ,vAcadienceStudentList.ContentName AS 'contentname'
+      ,vAcadienceStudentList.TestingPeriodID AS 'testingPeriodNumeric'
+      ,vAcadienceStudentList.TestingPeriodName
+      ,vAcadienceStudentList.ContentGroupName AS 'contentGroupName'
+      ,vAcadienceStudentList.TestedAtSchool AS schoolName
+      ,vAcadienceStudentList.TestedAtSchoolNumber AS cdeSchoolNumber
+      ,vAcadienceStudentList.CalendarName AS 'calendarname'
+  FROM dbSoars.acadience.vAcadienceStudentList WITH (NOLOCK)
+ LEFT JOIN AchievementDW.dim.StudentDemographic WITH (NOLOCK) ON vAcadienceStudentList.PersonID = StudentDemographic.PersonID
+	AND vAcadienceStudentList.StudentTestDate BETWEEN StudentDemographic.RecordStartDate AND StudentDemographic.RecordEndDate
+  WHERE vAcadienceStudentList.StandardLevelName = 'Overall'
+")
+
+dibelsNext <- qryAcadience%>% 
+  filter(EndYear %in% c(2022, 2023))%>% 
+  clean_names('lower_camel') 
+
+
+# Query DIBELS6----
+# which only holds data from 2020-2021 and prior
+qryOldDibels <- odbc::dbGetQuery(con, "
+SELECT  
+  studentdemographic.personid AS 'PersonID'
+      ,studentdemographic.frlstatus
+      ,studentdemographic.[readstatus]
+      ,studentdemographic.calculatedlanguageproficiency
+      ,studentdemographic.gt
+      ,studentdemographic.ethnicity
+      ,studentdemographic.genderdescription as Gender
+      ,studentdemographic.iep
+      ,studentdemographic.primarydisability
+      ,studentdemographic.programtype AS ELLProgram
+      ,vAcadienceStudentListPre2022.GradeID
+
+	  ,vAcadienceStudentListPre2022.ProficiencyLongDescription
+	  ,vAcadienceStudentListPre2022.TestTypeName
+	  ,vAcadienceStudentListPre2022.TestingPeriodID AS 'testingPeriodNumeric'
+	  ,vAcadienceStudentListPre2022.TestingPeriodName
+	        ,vAcadienceStudentListPre2022.EndYear
+	  ,vAcadienceStudentListPre2022.schoolName AS schoolName
+  FROM dbSoars.acadience.vAcadienceStudentListPre2022
+   LEFT JOIN AchievementDW.dim.StudentDemographic WITH (NOLOCK) ON vAcadienceStudentListPre2022.PersonID = StudentDemographic.PersonID
+  WHERE  vAcadienceStudentListPre2022.StandardLevelName = 'Overall'
+  AND vAcadienceStudentListPre2022.EndYear > 2019
+  AND vAcadienceStudentListPre2022.GradeID = 0
+                              ")
+
+dibels6 <- qryOldDibels %>% 
+  clean_names('lower_camel') %>% 
+  mutate(gender = case_when(
+    gender == 'Female' ~ 'F', 
+    gender == 'Male' ~ 'M', 
+    TRUE ~ 'U'
+  ))
+
+# Query Student Demograpics ----
+# It is challenging to pull READ Plan status from Enrollment. Need to careful set filters for enrollment and record dates, depending on inquiry
+# qryStuDemos <- odbc::dbGetQuery(con, 
+#                                 "
+# SELECT
+#   StudentDemographic.StudentNumber
+#   ,StudentDemographic.PersonID
+#   ,studentdemographic.[READ]
+#   ,StudentDemographic.READStatus
+#   ,Enrollment.Grade
+#   ,Enrollment.CDESchoolNumber
+#   ,Enrollment.CampusSchoolName
+#   ,Enrollment.EnrollmentStartDate
+#   ,Enrollment.EnrollmentEndDate
+#   ,StudentDemographic.RecordStartDate
+#   ,StudentDemographic.RecordEndDate
+#   ,SchoolYear.endyear     
+# FROM 
+#   AchievementDW.dim.Enrollment (NOLOCK)
+# JOIN 
+#   AchievementDW.dim.StudentDemographic (NOLOCK) ON Enrollment.PersonID = StudentDemographic.PersonID
+#   	AND (StudentDemographic.RecordEndDate BETWEEN Enrollment.EnrollmentstartDate AND Enrollment.EnrollmentEndDate
+# 		OR StudentDemographic.RecordEndDate = '9999-12-31 23:59:59.9999999')
+# --WHERE '05-26-2023' BETWEEN Enrollment.EnrollmentStartDate AND Enrollment.EnrollmentEndDate
+# --AND '05-01-2023' BETWEEN StudentDemographic.RecordStartDate AND StudentDemographic.RecordEndDate
+#   AND Enrollment.IsInvalid = 0
+#   AND StudentDemographic.IsInvalid = 0
+#   AND Enrollment.DeletedInCampus = 0
+#   AND Enrollment.LatestRecord = 1
+#   AND Enrollment.EnrollmentType = 'Primary'
+#   --AND StudentDemographic.StudentNumber = '2057918'
+# "
+# )
+# 
+# studentDemos <- qryStuDemos %>% 
+#   mutate(EnrollmentStartDate = as.Date(EnrollmentStartDate), 
+#          EnrollmentEndDate = as.Date(EnrollmentEndDate), 
+#          startDate = day(EnrollmentStartDate), 
+#          startMonth = month(EnrollmentStartDate), 
+#          startYear = year(EnrollmentStartDate), 
+#          endDate = day(EnrollmentEndDate), 
+#          endMonth = month(EnrollmentEndDate), 
+#          endYear = year(EnrollmentEndDate)) %>% 
+#   filter(startYear == 2023, 
+#          str_detect(READStatus, 'Exit')) %>% 
+#   distinct(PersonID, .keep_all = T)
+
+# Query to CMAS results ----
+qryCmas <- dbGetQuery(con, 
+                       "
+
+                  SELECT vPARCCStudentList.PersonID
+                        ,vPARCCStudentList.StudentNumber
+                       ,vPARCCStudentList.[SASID]
+                       ,vPARCCStudentList.GradeDescription
+                       ,vPARCCStudentList.Grade
+                       ,vPARCCStudentList.FRLStatus
+                       ,vPARCCStudentList.READStatus
+                       ,vPARCCStudentList.CalculatedLanguageProficiency
+                       ,vPARCCStudentList.[504Plan] AS X504Plan
+                       ,vPARCCStudentList.GT
+                       ,vPARCCStudentList.Ethnicity
+                       ,vPARCCStudentList.Gender
+                       ,vPARCCStudentList.GenderDescription
+                       ,vPARCCStudentList.IEP
+                       ,vPARCCStudentList.IEPStatus
+                       ,vPARCCStudentList.PrimaryDisability
+                       ,vPARCCStudentList.ScaleScore
+                       ,vPARCCStudentList.ProficiencyLongDescription
+                       ,vPARCCStudentList.ProficiencyDescription
+                       ,vPARCCStudentList.TestID
+
+                       ,vPARCCStudentList.TestName
+                       ,vPARCCStudentList.TestTypeName
+                       ,vPARCCStudentList.WindowStartDate
+                       ,vPARCCStudentList.WindowEndDate
+                       ,vPARCCStudentList.EndYear
+                       ,vPARCCStudentList.ContentName
+                       ,vPARCCStudentList.ContentGroupName
+                       ,vPARCCStudentList.TestingPeriodName
+                       ,vPARCCStudentList.TestTestPartID
+                       ,vPARCCStudentList.TestTestPartLongDescription
+                       ,vPARCCStudentList.TestTestPartShortDescription
+                       ,vPARCCStudentList.TestTestPartDescription
+                       ,vPARCCStudentList.RangeBottom
+                       ,vPARCCStudentList.RangeTop
+                       ,vPARCCStudentList.StandardLevelID
+                       ,vPARCCStudentList.StandardLevelName
+                       ,vPARCCStudentList.OverallFlag
+                       ,vPARCCStudentList.CDESchoolNumber
+                       ,vPARCCStudentList.School
+                       
+                       ,vGetPARCCGrowthStudentList.GrowthPercentile
+                       ,vGetPARCCGrowthStudentList.ProficiencyLongDescription as ProficiencyLongDescriptionGrowth
+                       ,vGetPARCCGrowthStudentList.RangeBottom as RangeBottomGrowth
+                       ,vGetPARCCGrowthStudentList.RangeTop as RangeTopGrowth
+                                        ,vGetPARCCGrowthStudentList.IsIncludedSchoolAccountability
+                                        ,vGetPARCCGrowthStudentList.IsIncludedDistrictAccountability
+                       
+                       FROM dbSoars.parcc.vPARCCStudentList  WITH (NOLOCK)
+                       LEFT JOIN dbSoars.parcc.vGetPARCCGrowthStudentList WITH (NOLOCK) ON dbSoars.parcc.vGetPARCCGrowthStudentList.PersonID = dbSoars.parcc.vPARCCStudentList.PersonID AND
+                       dbSoars.parcc.vGetPARCCGrowthStudentList.TestID = dbSoars.parcc.vPARCCStudentList.TestID
+                       
+                       WHERE (dbSoars.parcc.vPARCCStudentList.OverallFlag = 1)
+                        
+                        
+                        ")
+
+cmasPerformance <- qryCmas %>% 
+  clean_names('lower_camel') %>% 
+  filter(contentGroupName == 'READING', 
+         grade == '3', 
+         endYear == 2024, 
+         !is.na(proficiencyLongDescription)) %>% 
+  select(personId, grade, cmasProfLevel = proficiencyLongDescription, testName)
+
+cmasWithRead <- cmasPerformance %>% 
+  right_join(flagWider, join_by(personId == personID)) %>% 
+  mutate(n = n_distinct(personId)) %>% 
+  group_by(cmasProfLevel) %>% 
+  mutate(profN = n(), 
+         profPct = profN/n) 
+  
+## Explore the CMAS performance levels of students from cohort alongside their READ Plan info ----
+cmasNoScore <- cmasPerformance %>% 
+  full_join(flagWider, join_by(personId == personID)) %>% 
+  mutate(n = n_distinct(personId)) %>% 
+  filter(is.na(cmasProfLevel)) %>% 
+  mutate(readPlanN = n())
+
+### Plot summary of CMAS performance for exited students ----
+flagGrade3 <- flagStart %>% 
+  filter(gradeInt == 3, 
+         EndYear == 2024, 
+         !is.na(planEnd)) %>% 
+  distinct(personID)
+
+grade3ExitedCMAS <- flagGrade3 %>% 
+  ungroup() %>% 
+  left_join(cmasPerformance, join_by(personID == personId)) %>% 
+  filter(!is.na(cmasProfLevel)) %>% 
+  distinct(personID, cmasProfLevel) %>% 
+  mutate(totalN = n()) %>% 
+  group_by(cmasProfLevel) %>% 
+  reframe(groupN = n(), 
+          totalN = first(totalN),
+          groupPct = round(groupN/totalN,4)) %>% 
+  mutate(cmasProfLevel = str_remove(cmasProfLevel, ' Expectations')) %>% 
+  mutate(cmasProfLevel = factor(cmasProfLevel, 
+                                levels= c('Exceeded', 
+                                          'Met', 
+                                          'Approached', 
+                                          'Partially Met', 
+                                          'Did Not Yet Meet')))
+
+ggplot(data = grade3ExitedCMAS, 
+       mapping = aes(x = totalN, 
+                     y = groupPct, 
+                     fill = cmasProfLevel))+
+  geom_bar(stat= 'identity', 
+           position = 'stack') +
+  geom_label(aes(label = paste0(groupN, '-', scales::percent(groupPct, 2))), 
+             position = position_stack(vjust = 0.5), 
+             size = 5,
+             show.legend = F
+  ) +
+  labs(title = 'CMAS Performace', 
+       subtitle = 'Grade 3 in 2024') +
+  theme_minimal() +
+  theme(axis.title = element_blank(), 
+        axis.text = element_blank(), 
+        legend.position = 'top', 
+        legend.title = element_blank())
+
+## Explore the DIBELS performance levels of students from cohort alongside their READ Plan info ----
+dibelsCombined <- dibels8Grade3 %>% 
+  full_join(dibels6) %>% 
+  full_join(dibelsNext)  %>% 
+  arrange(personId, studentTestDate) %>% 
+  filter(gradeId %in% 0:3) %>% 
+  mutate(studentTestDate = as.Date(studentTestDate), 
+         studentTestDate = ymd(studentTestDate)) %>% 
+  group_by(personId) %>% 
+  filter(studentTestDate == max(studentTestDate, na.rm = T)) %>%
+  filter(contentname == 'READING')
+
+flagStartFilledFlag <- flagStart %>% 
+  fill(planEnd, .direction = 'down')
+
+dibelsWithFlag <-  dibelsCombined %>% 
+  inner_join(flagStartFilledFlag, 
+             join_by(personId == personID, 
+                     endYear == EndYear, 
+                     gradeId == gradeInt), 
+             relationship = "many-to-many") %>% 
+  # filter(personId == 1557545) %>%
+  mutate(planEnd = str_remove(planEnd, "^.{0,3}")) %>% 
+  inner_join(cmasPerformance, by = join_by(personId)) %>%
+  # filter(!is.na(planEnd)) %>%
+  mutate(planEnd = replace_na(planEnd, "No exit by end of grade 3")) %>% 
+  group_by(personId) %>% 
+  mutate(planEndDate = replace_na(planEndDate, as.Date("2024-05-24"))) %>% 
+  mutate(studentPlanLength = interval( PlanStartDate, planEndDate,) / years(1)) %>% 
+  ungroup() %>% 
+  mutate(meanPlanLength = round(mean(studentPlanLength, na.rm = T), 2)) %>% 
+  filter(testName == 'CMAS ELA Grade 03 2023-24') %>% 
+  group_by(cmasProfLevel, planEnd) %>% 
+  mutate(cmasPlanLength = round(mean(studentPlanLength, na.rm = T), 2))
+
+#Pull students with Exit Status and Did Not Meet CMAS Expectations ----
+flagGrade3Students <- flagStart %>% 
+  filter(gradeInt == 3, 
+         EndYear == 2024, 
+         !is.na(planEnd)) %>% 
+  distinct(personID)
+
+studentsExitDidNotMeetCMAS <- flagGrade3Students %>% 
+  ungroup() %>% 
+  left_join(cmasPerformance, join_by(personID == personId)) %>% 
+  filter(!is.na(cmasProfLevel)) %>% 
+  distinct(personID, cmasProfLevel) %>% 
+  mutate(totalN = n()) %>% 
+  filter(cmasProfLevel == 'Did Not Yet Meet Expectations') %>% 
+  ungroup() %>% 
+  distinct(personID)
+
+dibelsAll <- dibels8Grade3 %>% 
+  full_join(dibels6) %>% 
+  full_join(dibelsNext)  %>% 
+  arrange(personId, studentTestDate) %>% 
+  filter(gradeId %in% 0:3) %>% 
+  mutate(studentTestDate = as.Date(studentTestDate), 
+         studentTestDate = ymd(studentTestDate)) %>% 
+  group_by(personId) %>% 
+  filter(contentname == 'READING') %>% 
+  filter(studentTestDate == max(studentTestDate, na.rm = T)) 
+
+allTestsStudentsExitDidNotMeetCMAS <- dibelsAll %>% 
+  right_join(studentsExitDidNotMeetCMAS, 
+             join_by(personId == personID))
+
+#Load Demographics Lookup Tables ----
+    frlLookup <- data.frame(
+      stringsAsFactors = FALSE,
+      frlstatus = c("No FRL", "Reduced Lunch", "Free Lunch"),
+      frlBin = c(0L, 1L, 1L),
+      frlLabels = c("Not Free or Reduced Lunch",
+                 "Free or Reduced Lunch Eligible",
+                 "Free or Reduced Lunch Eligible")
+    )
+    
+    gtLookup <- data.frame(
+      stringsAsFactors = FALSE,
+      gt = c("GT", "Not GT"),
+      gtBin = c(1L, 0L),
+      gtLabels = c("GT", "Not GT")
+    )
+    
+    iepLookup <- data.frame(
+      stringsAsFactors = FALSE,
+      iep = c("No IEP", "Exited IEP", "IEP"),
+      iepBin = c(0L, 0L, 1L),
+      iepLabels = c("No IEP", "No IEP", "IEP")
+    )
+    
+    mlLookup <- data.frame(
+      stringsAsFactors = FALSE,
+      calculatedlanguageproficiency = c("Not ELL",
+                                        "NEP",
+                                        "LEP",
+                                        "FEP M1",
+                                        "FEP M2",
+                                        "FEP T3+",
+                                        "FELL",
+                                        # "PHLOTE",
+                                        "Prior to Feb 2013","FEP E1",
+                                        "FEP E2"),
+      mlBin = c(0L,1L,1L,
+                 1L,1L,1L,0L,
+                 # NA,
+                 0L,1L,
+                 1L),
+      mlLabels = c("Not ML",
+                 "Multilingual Learner",
+                 "Multilingual Learner",
+                 "Multilingual Learner",
+                 "Multilingual Learner",
+                 "Multilingual Learner",
+                 "Not ML",
+                 "Not ML",
+                 # "Not ELL",
+                 "Multilingual Learner",
+                 "Multilingual Learner")
+    )
+    
+    raceLookup <-data.frame(
+      stringsAsFactors = FALSE,
+      ethnicity = c("White","Hispanic","Multi",
+                    "Asian","Black","Am. Indian","Pacific Islander"),
+      raceBin = c(0L, 1L, 1L, 1L, 1L, 1L, 1L),
+      raceLabels = c("White Students",
+                 "Students of Color or Hispanic","Students of Color or Hispanic",
+                 "Students of Color or Hispanic","Students of Color or Hispanic",
+                 "Students of Color or Hispanic","Students of Color or Hispanic")
+    )
+    
+## Create binary values for demographic variables ----
+  allEoy2024Data <- dibelsWithFlag %>% 
+    full_join(raceLookup) %>% 
+    full_join(mlLookup) %>% 
+    full_join(iepLookup) %>% 
+    full_join(frlLookup) %>% 
+    full_join(gtLookup) %>% 
+    filter(!is.na(personId))
+    
+### Summarize plan length by student group
+  allEoyLong <- allEoy2024Data %>% 
+    mutate(across(c(jsel, jeffcoPk, childFind, remoteKinder), as.character)) %>% 
+      pivot_longer(cols = c(raceLabels, mlLabels, iepLabels, frlLabels, gtLabels, jsel, jeffcoPk, childFind, remoteKinder), 
+                 names_to = 'category', 
+                 values_to = 'categoryValue') %>% 
+      group_by(category, categoryValue, planEnd) %>% 
+    summarize(categoryPlanLength = round(mean(studentPlanLength), 2)) %>% 
+    group_by(category, planEnd) %>% 
+    # filter(planEnd == 'Exit plan') %>% 
+    group_by(category) %>% 
+    mutate(diff = lag(categoryPlanLength) - (categoryPlanLength))
+
+  ### Summarize student groups by exit status ----
+  
+  allEoyGroupSummary <- allEoy2024Data %>% 
+    pivot_longer(cols = c(raceBin, mlBin, iepBin, frlBin, gtBin,jsel, jeffcoPk, childFind, remoteKinder), 
+                 names_to = 'category', 
+                 values_to = 'categoryValue') %>% 
+    ungroup() %>% 
+    mutate(n = n_distinct(personId)) %>% 
+    group_by(planEnd) %>% 
+    mutate(planN = n_distinct(personId)) %>% 
+    group_by(category, categoryValue) %>% 
+    mutate(categoryN = n_distinct(personId)) %>% 
+    group_by(category, categoryValue, planEnd) %>% 
+    summarise(n = first(n), 
+              planN = first(planN),
+              groupN = n_distinct(personId),
+              categoryN = first(categoryN),
+              groupPct = groupN/categoryN
+              )  %>% 
+    filter(planEnd == 'Exit plan') %>% 
+    mutate(categoryValue = replace_na(categoryValue, 0), 
+           categoryValue = factor(categoryValue, 
+                                 levels = 1:0, 
+                                 labels = c('Yes', 'No'))) %>% 
+    mutate(category = factor(category, 
+                             levels = c( 
+                                        'frlBin', 
+                                        'iepBin', 
+                                        'mlBin', 
+                                        'raceBin', 
+                                        'remoteKinder', 
+                                        'childFind',
+                                        'jeffcoPk', 
+                                        'jsel', 
+                                        'gtBin'), 
+                             labels = c(
+                               'Free or Reduced Lunch Eligible', 
+                               'Individual Education Program', 
+                               'Multilingual Learner Program', 
+                               'Students of Color or Hispanic', 
+                               'Remote Learning Program for Kindergarten', 
+                               'ChildFind Program',
+                               'Jeffco PK Program', 
+                               'Jeffco Summer Learning Program >10 days', 
+                               'Gifted and Talented Program'
+                                      )
+                             )) %>% 
+    group_by(category) %>% 
+    arrange(category, categoryValue)
+  
+  gt(allEoyGroupSummary) %>% 
+    cols_label(categoryValue = 'Group Status', 
+               groupN = 'Students in Exit Status', 
+               categoryN = 'Total', 
+               groupPct = 'Percent') %>% 
+    cols_hide(c(planEnd, n, planN)) %>%
+    fmt_percent(groupPct, decimals = 0) %>% 
+    fmt_number(categoryN, decimals = 0) %>% 
+    tab_header(title = 'Percent of Students Who Exited READ Plan By The End of Grade 3', 
+               subtitle = '2020-2021 Kindergarten Student Cohort (Grade 3 in 2023-2024)') %>% 
+    cols_align(
+    align = c("left"),
+    columns = categoryValue
+  ) %>% 
+    cols_align(
+      align = c("center"),
+      columns = c(groupN, categoryN, groupPct)
+    ) %>% 
+    opt_table_outline() %>% 
+    tab_style(
+      cell_fill('grey'), 
+      cells_row_groups()
+    ) %>% 
+    tab_options(
+      table.font.size = 12
+    )
+  
+  ### Run T Test ----
+  allEoyGroups <- allEoy2024Data %>% 
+    pivot_longer(cols = c(raceBin, mlBin, iepBin, frlBin, gtBin,jsel, jeffcoPk, childFind, remoteKinder), 
+                 names_to = 'category', 
+                 values_to = 'categoryValue') %>% 
+    ungroup() %>% 
+    mutate(planEnd = ifelse(planEnd== 'Exit plan', 1, 0)) %>% 
+    mutate(categoryValue = replace_na(categoryValue, 0)) %>% 
+    select(category, categoryValue, planEnd) %>% 
+    filter(category == 'jsel')
+  
+  
+  t.test(categoryValue ~ planEnd, data = allEoyGroups)
+
+# Understand student enrollment history ----
+  ## Query of enrollments in Campus ----
+  qryFlagsEnrollmentOverTime <- odbc::dbGetQuery(con, 
+                               "
+SELECT
+V_ProgramParticipation.personID
+ ,Enrollment.Grade
+ ,Enrollment.CampusSchoolName
+ ,Enrollment.EnrollmentStartDate
+ ,Enrollment.EnrollmentEndDate
+ ,Enrollment.EndYear
+ ,Enrollment.CalendarName
+ ,Enrollment.EnrollmentType
+FROM 
+  Jeffco_IC.dbo.V_ProgramParticipation (NOLOCK)
+JOIN AchievementDW.dim.Enrollment (NOLOCK) ON 
+  Enrollment.PersonID = V_ProgramParticipation.PersonID
+WHERE
+ name = 'READ'
+AND
+  V_ProgramParticipation.active = 1
+AND 
+  Enrollment.DeletedInCampus = 0
+AND 
+  Enrollment.LatestRecord = 1
+"
+  )
+  
+  ### Transform query date fields ----
+  # filter to students of interest
+  flagWithEnrollment <- qryFlagsEnrollmentOverTime %>% 
+    mutate(startDate = as_date(EnrollmentStartDate), # format as date
+           endDate = as_date(EnrollmentEndDate),
+           EnrollmentStartDate = ymd(EnrollmentStartDate), 
+           EnrollmentEndDate = ymd(EnrollmentEndDate)) %>%  #create time interval) 
+    select(personID, Grade, CampusSchoolName, CalendarName, EnrollmentStartDate, EnrollmentEndDate,EnrollmentType, EndYear) %>%
+    filter(EnrollmentEndDate < '2024-06-30' | is.na(EnrollmentEndDate)) %>% #exclude enrollments in the 2025 school year
+    mutate(gradeInt = case_when(
+      Grade == 'K' ~ 0, 
+      Grade == 'PK' ~ -1, 
+      Grade == 'It' ~ -2, 
+      TRUE ~ as.numeric(Grade)
+    )) %>% # convert grade grade to numeric value to arrange/sort by
+    filter(gradeInt < 4) %>% 
+    arrange(personID, gradeInt, desc(EnrollmentStartDate), desc(EnrollmentEndDate)) %>% 
+    mutate(grade3In24 = case_when(
+      gradeInt == 3 & EndYear == 2024 ~ 'Y', 
+      TRUE ~ NA
+    )) %>% 
+    # filter(EndYear > 2020) %>% 
+    group_by(personID) %>% 
+    fill(grade3In24, .direction = 'up') %>% 
+    filter(grade3In24 == 'Y') %>% 
+    mutate(jeffcoPk = case_when(
+      Grade =='PK' | Grade == 'It' ~ 1,
+      TRUE ~ NA
+    )) %>% 
+    arrange(personID, EnrollmentStartDate) %>% 
+    fill(jeffcoPk, .direction = 'down') %>% 
+    mutate(enrollmentLength = EnrollmentEndDate -EnrollmentStartDate) %>% 
+    filter(enrollmentLength > 10) %>% 
+    mutate(jsel = str_detect(CalendarName, 'SEL')) %>% 
+    mutate(remoteKinder = case_when(
+      str_detect(CalendarName, 'RL') & EnrollmentType == 'Primary' & EndYear == 2021 ~ 1, 
+      TRUE ~ NA_real_)) %>% 
+    select(personID, Grade, gradeInt, CalendarName, EndYear, jeffcoPk, enrollmentLength, jsel, remoteKinder) %>% 
+    arrange(personID, desc(jeffcoPk)) %>% 
+    fill(jeffcoPk, .direction = 'down') %>% 
+    mutate(jsel = case_when(
+      jsel == FALSE ~ NA_real_, 
+      TRUE ~ 1
+    )) %>% 
+    arrange(personID, desc(jsel)) %>% 
+    fill(jsel, .direction = 'down') %>% 
+    arrange(personID, desc(remoteKinder)) %>% 
+    fill(remoteKinder, .direction = 'down') %>% 
+    group_by(personID, jeffcoPk, jsel, remoteKinder) %>% 
+    summarise() %>% 
+    pivot_longer(cols = jeffcoPk:remoteKinder, 
+                 names_to = 'program', 
+                 values_to = 'programValue') 
+    
+  
+  ### Summarize plan length by student group
+  allEoyDemos <- allEoy2024Data %>% 
+    pivot_longer(cols = c(raceLabels, mlLabels, iepLabels, frlLabels, gtLabels), 
+                 names_to = 'category', 
+                 values_to = 'categoryValue') %>% 
+    ungroup() %>% 
+    select(personId, planEnd)
+
+  allDemosPrograms <- allEoyDemos %>% 
+    left_join(flagWithEnrollment, 
+               join_by(personId == personID), 
+               relationship = "many-to-many") %>% 
+    ungroup() %>% 
+    mutate(n = n_distinct(personId)) %>% 
+    group_by(planEnd) %>% 
+    mutate(planN = n_distinct(personId)) %>% 
+    group_by(program, programValue, planEnd) %>% 
+    summarise(n = first(n), 
+              planN = first(planN),
+              groupN = n_distinct(personId), 
+              groupPct = groupN/planN) %>% 
+    filter(programValue == 1)
+  
+# What time of the year of plans tend to start?----  
+  planStartTime <- flagStart %>% 
+    filter(!is.na(planStart)) %>% 
+    mutate(planStartMonth = month(PlanStartDate), 
+           planEndMonth = month((planEndDate))) %>% 
+    distinct(personID, .keep_all = T)
+  
+## by month?----
+  planStartTimeMonth <- planStartTime %>% 
+    group_by(planStart) %>% 
+    mutate(startN = n()) %>% 
+    group_by(planStart, planStartMonth) %>% 
+    mutate(startMonthN = n()) %>% 
+    group_by(planStart, 
+             planStartMonth, 
+             startN, 
+             startMonthN
+    ) %>% 
+    summarise() %>% 
+    mutate(startPct = startMonthN/startN) %>% 
+  group_by(planStart) %>% 
+    mutate(planStart = str_remove(planStart, '- Start plan')) %>% 
+    mutate(planStart = case_when(
+      planStart == "K" ~ 0, 
+      TRUE ~ as.numeric(planStart)
+    )) %>% 
+    mutate(planStart = factor(planStart, 
+                              levels = 0:3, 
+                              labels = c('Kindergarten', 'Grade 1', 
+                                         'Grade 2', 
+                                         'Grade 3'))) %>% 
+    mutate(planStartMonth = factor(planStartMonth, 
+                                   levels = c(8, 9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7),
+                                   labels = c('Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul'))) %>% 
+    arrange(planStart, desc(startPct))
+
+  gt(planStartTimeMonth)    %>% 
+    cols_label(planStartMonth = '', 
+               startMonthN = 'Number of students', 
+               startPct = 'Percent') %>% 
+    cols_align(
+      align = c("left"),
+      columns = planStartMonth
+    ) %>% 
+    cols_align(
+      align = c("center"),
+      columns = c(startMonthN, startPct)
+    ) %>% 
+    opt_table_outline() %>% 
+    tab_style(
+      cell_fill('grey'), 
+      cells_row_groups()
+    ) %>% 
+    cols_hide(
+      c(startN)
+    ) %>% 
+    fmt_percent(
+      startPct, 
+      decimals = 0
+    ) %>% 
+    tab_header(
+      title = 'Student Plan starting Month', 
+      subtitle = '2020-2021 Kindergarten Student Cohort (Grade 3 in 2023-2024)'
+    ) %>% 
+    tab_options(
+      table.font.size = 12
+    )
+    
+  ## by season? ----
+   planStartTimeSeason<- planStartTime %>% 
+    mutate(planStart = str_remove(planStart, '- Start plan')) %>% 
+    mutate(planStart = case_when(
+      planStart == "K" ~ 0, 
+      TRUE ~ as.numeric(planStart)
+    )) %>% 
+    mutate(planStart = factor(planStart, 
+                              levels = 0:3, 
+                              labels = c('Kindergarten', 'Grade 1', 
+                                         'Grade 2', 
+                                         'Grade 3'))) %>% 
+    group_by(planStart) %>% 
+    mutate(startN = n()) %>% 
+    mutate(planStartTimeSeason = case_when(
+      planStartMonth %in% 8:11 ~ 'BOY', 
+      planStartMonth %in% c(12, 1, 2, 3) ~ 'MOY', 
+      planStartMonth %in% 4:5 ~ 'EOY', 
+      TRUE ~ 'Summer'
+    )) %>% 
+    group_by(planStart, planStartTimeSeason) %>% 
+    mutate(startSeasonN = n()) %>% 
+    group_by(planStart, 
+             planStartTimeSeason, 
+             startN, 
+             startSeasonN
+    ) %>% 
+    summarise() %>% 
+    mutate(startPct = startSeasonN/startN) %>% 
+    group_by(planStart) %>% 
+    mutate(planStartTimeSeason = factor(planStartTimeSeason, 
+                                   levels = c('BOY', 'MOY', "EOY"))) %>% 
+    arrange(planStart, desc(startPct))
+  
+  gt(planStartTimeSeason)    %>% 
+    cols_label(planStartTimeSeason = '', 
+               startSeasonN = 'Number of students', 
+               startPct = 'Percent') %>% 
+    cols_align(
+      align = c("left"),
+      columns = planStartTimeSeason
+    ) %>% 
+    cols_align(
+      align = c("center"),
+      columns = c(startSeasonN, startPct)
+    ) %>% 
+    opt_table_outline() %>% 
+    tab_style(
+      cell_fill('grey'), 
+      cells_row_groups()
+    ) %>% 
+    cols_hide(
+      c(startN)
+    ) %>% 
+    fmt_percent(
+      startPct, 
+      decimals = 0
+    ) %>% 
+    tab_header(
+      title = 'Student Plan starting season', 
+      subtitle = '2020-2021 Kindergarten Student Cohort (Grade 3 in 2023-2024)'
+    ) %>% 
+    tab_options(
+      table.font.size = 12
+    )
+  
+  
+  # What time of the year of plans tend to end?----  
+  planEndTime <- flagStart %>% 
+    filter(!is.na(planEnd)) %>% 
+    mutate(planStartMonth = month(PlanStartDate), 
+           planEndMonth = month((planEndDate))) %>% 
+    distinct(personID, .keep_all = T)
+  
+  
+  ## by season? ----
+  planEndTimeSeason<- planEndTime %>% 
+    mutate(planEnd = str_remove(planEnd, '- Exit plan')) %>% 
+    mutate(planEnd = case_when(
+      planEnd == "K" ~ 0, 
+      TRUE ~ as.numeric(planEnd)
+    )) %>% 
+    mutate(planEnd = factor(planEnd, 
+                              levels = 0:3, 
+                              labels = c('Kindergarten', 'Grade 1', 
+                                         'Grade 2', 
+                                         'Grade 3'))) %>% 
+    group_by(planEnd) %>% 
+    mutate(endN = n()) %>% 
+    mutate(planEndTimeSeason = case_when(
+      planEndMonth %in% 8:11 ~ 'BOY', 
+      planEndMonth %in% c(12, 1, 2, 3) ~ 'MOY', 
+      planEndMonth %in% 4:5 ~ 'EOY', 
+      TRUE ~ 'Summer'
+    )) %>% 
+    group_by(planEnd, planEndTimeSeason) %>% 
+    mutate(endSeasonN = n()) %>% 
+    group_by(planEnd, 
+             planEndTimeSeason, 
+             endN, 
+             endSeasonN
+    ) %>% 
+    summarise() %>% 
+    mutate(endPct = endSeasonN/endN) %>% 
+    group_by(planEnd) %>% 
+    mutate(planEndTimeSeason = factor(planEndTimeSeason, 
+                                        levels = c('BOY', 'MOY', "EOY"))) %>% 
+    arrange(planEnd, desc(endPct))
+  
+  gt(planEndTimeSeason)    %>% 
+    cols_label(planEndTimeSeason = '', 
+               endSeasonN = 'Number of students', 
+               endPct = 'Percent') %>% 
+    cols_align(
+      align = c("left"),
+      columns = planEndTimeSeason
+    ) %>% 
+    cols_align(
+      align = c("center"),
+      columns = c(endSeasonN, endPct)
+    ) %>% 
+    opt_table_outline() %>% 
+    tab_style(
+      cell_fill('grey'), 
+      cells_row_groups()
+    ) %>% 
+    cols_hide(
+      c(endN)
+    ) %>% 
+    fmt_percent(
+      endPct, 
+      decimals = 0
+    ) %>% 
+    tab_header(
+      title = 'Student Plan Sseason when Students Exited Plan', 
+      subtitle = '2020-2021 Kindergarten Student Cohort (Grade 3 in 2023-2024)'
+    ) %>% 
+    tab_options(
+      table.font.size = 12
+    )
+
+  
