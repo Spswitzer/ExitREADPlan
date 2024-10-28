@@ -1324,7 +1324,7 @@ AND
     
     
     planEndSample <- allLong %>% 
-      filter(planEnd == 1) %>% 
+      filter(planEnd ==1) %>% 
       mutate(personId = as.character(personId)) 
     
     sample(x = planEndSample$personId, 
