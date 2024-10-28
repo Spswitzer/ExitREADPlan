@@ -2,13 +2,15 @@
 # Title: READ Plan Flags
 # Author: Susan Switzer
 # Created: 10/08/24
-# Revised: 10/24/24
+# Revised: 10/28/24
 # The purpose of this script is to determine which 3rd students (2023-2024) from the kindergarten class of 2020-2021 had a READ plan at any time and when/if they exited the plan
 
 #load libraries ----
 library(gt)
 library(odbc)
 library(DBI)
+library(corrplot)
+library(Hmisc)
 library(janitor)
 library(tidyverse)
 # connect to SQL database ----
@@ -116,7 +118,11 @@ flagStart <- qryFlags %>%
   fill(remoteKinder, .direction = 'down') %>% 
   arrange(personID, desc(childFind)) %>% 
   fill(childFind, .direction = 'down') %>% 
-  filter(EnrollmentType == 'Primary')
+  filter(EnrollmentType == 'Primary') %>% 
+  mutate(planStart = case_when(
+    is.na(planStart) & personID == 1625455 & Grade == 'K' ~ 'K- Start plan', 
+    TRUE ~ planStart
+  )) #person 1625455 started plan after enrollment end
 
 
 ## Transform data into long format to add in summarizing ----
@@ -150,7 +156,8 @@ flagSummary <- flagStart %>%
             planEndPct = startEndN/planStartN, 
             totalN = first(totalN)) %>% 
   mutate(planEnd = replace_na(planEnd, 'No End')) %>% 
-  filter(!is.na(planStart)) %>% 
+
+  # filter(!is.na(planStart)) %>% 
   mutate(planStart = factor(planStart, 
                         levels = c('K', '1', '2', '3'), 
                         labels = c('Kindergarten', '1st', '2nd', '3rd'), 
@@ -160,13 +167,14 @@ flagSummary <- flagStart %>%
   mutate(planEnd = factor(planEnd, 
                           levels = c('K', '1', '2', '3', 'No End'),
                           labels = c('Kinder', '1st', '2nd', '3rd', 'No End'),
-                          ordered = T))
+                          ordered = T)) %>% 
+  arrange(planEnd)
   ## Create sumamry GT table ----
 gt(flagSummary) %>% 
   cols_label(planEnd = 'Grade when Plan Ended', 
              startEndN = 'Number of students', 
              planEndPct = 'Percent') %>% 
-  row_group_order(groups = c('Kindergarten - 618 Students started plan', 
+  row_group_order(groups = c('Kindergarten - 619 Students started plan', 
                              '1st - 704 Students started plan', 
                              '2nd - 321 Students started plan', 
                              '3rd - 290 Students started plan')) %>% 
@@ -191,14 +199,14 @@ gt(flagSummary) %>%
     ) %>% 
   fmt_percent(
     planEndPct, 
-    decimals = 1
+    decimals = 0
     ) %>% 
   fmt_number(
     startEndN, 
-    decimals = 1
+    decimals = 0
   ) %>% 
   tab_header(
-    title = 'Students who started and discontinued plan within by end of grade 3', 
+    title = 'Students who started and exited a READ plan by end of grade 3', 
     subtitle = '2020-2021 Kindergarten Student Cohort (Grade 3 in 2023-2024)'
     ) %>% 
   tab_options(
@@ -227,13 +235,14 @@ gt(cohortSummary) %>%
   ) %>% 
   opt_table_outline() %>% 
   cols_hide(totalN) %>% 
-  fmt_percent(planEndPct, decimals = 1) %>% 
+  fmt_percent(planEndPct, decimals = 0) %>% 
+  fmt_number(planEndN, decimals = 0) %>% 
   tab_header(
-    title = 'Students who started and discontinued plan within by end of grade 3', 
+    title = 'Grade level when students exited READ plan', 
     subtitle = '2020-2021 Kindergarten Student Cohort (Grade 3 in 2023-2024)'
   ) 
 
-## Transform data into Wide forpersonID## Transform data into Wide format to add in summarizing ----
+## Transform data into Wide for personID## Transform data into Wide format to add in summarizing ----
 flagWider <- flagLonger %>% 
   pivot_wider(names_from = Grade, 
               names_prefix = "Grade",
@@ -242,10 +251,10 @@ flagWider <- flagLonger %>%
   select(personID, GradeK, Grade1, Grade2, Grade3) %>%
   mutate(across(GradeK:Grade3, ~replace(., lengths(.) == 0, NA))) %>% 
   mutate(across(GradeK:Grade3, ~str_replace(., '^c(.*)$', 
-                                            'Start and Exit plan')))#clean up output
+                                            'Start and Exit plan'))) #clean up output
 
 # Query DIBELS8 ----
-# which only holds data from 2023-2024 +
+# holds data from 2023-2024 +
 # some students repeated due to multiple tests for single window due to re-testing and testing in Spanish
 qryDibels8 <- odbc::dbGetQuery(con, "
 
@@ -332,7 +341,7 @@ dibels8Grade3 <- qryDibels8 %>%
   clean_names('lower_camel')
 
 # Query Acadience----
-# which only holds data from 2021-2022  & 2022-2023 
+# holds data from 2021-2022  & 2022-2023 
 qryAcadience <- odbc::dbGetQuery(con, "
 SELECT  
       vAcadienceStudentList.PersonID
@@ -368,9 +377,8 @@ dibelsNext <- qryAcadience%>%
   filter(EndYear %in% c(2022, 2023))%>% 
   clean_names('lower_camel') 
 
-
 # Query DIBELS6----
-# which only holds data from 2020-2021 and prior
+# holds data from 2020-2021 and prior
 qryOldDibels <- odbc::dbGetQuery(con, "
 SELECT  
   studentdemographic.personid AS 'PersonID'
@@ -456,7 +464,6 @@ dibels6 <- qryOldDibels %>%
 # Query to CMAS results ----
 qryCmas <- dbGetQuery(con, 
                        "
-
                   SELECT vPARCCStudentList.PersonID
                         ,vPARCCStudentList.StudentNumber
                        ,vPARCCStudentList.[SASID]
@@ -539,48 +546,105 @@ cmasNoScore <- cmasPerformance %>%
 ### Plot summary of CMAS performance for exited students ----
 flagGrade3 <- flagStart %>% 
   filter(gradeInt == 3, 
-         EndYear == 2024, 
-         !is.na(planEnd)) %>% 
-  distinct(personID)
+         EndYear == 2024
+         ) %>% 
+  distinct(personID, planEnd)
 
 grade3ExitedCMAS <- flagGrade3 %>% 
   ungroup() %>% 
   left_join(cmasPerformance, join_by(personID == personId)) %>% 
   filter(!is.na(cmasProfLevel)) %>% 
-  distinct(personID, cmasProfLevel) %>% 
+  distinct(personID, cmasProfLevel, .keep_all = T) %>% 
   mutate(totalN = n()) %>% 
-  group_by(cmasProfLevel) %>% 
+  group_by(planEnd) %>% 
+  mutate(planN = n()) %>% 
+  group_by(cmasProfLevel, planEnd) %>% 
   reframe(groupN = n(), 
+          planN = first(planN),
           totalN = first(totalN),
-          groupPct = round(groupN/totalN,4)) %>% 
+          groupPct = round(groupN/planN,4)) %>% 
   mutate(cmasProfLevel = str_remove(cmasProfLevel, ' Expectations')) %>% 
   mutate(cmasProfLevel = factor(cmasProfLevel, 
                                 levels= c('Exceeded', 
                                           'Met', 
                                           'Approached', 
                                           'Partially Met', 
-                                          'Did Not Yet Meet')))
+                                          'Did Not Yet Meet'))) %>% 
+  mutate(planEnd = case_when(
+    is.na(planEnd) ~ 'on READ Plan', 
+    TRUE ~ 'Exited READ plan in Grade 3'
+  ))
 
 ggplot(data = grade3ExitedCMAS, 
        mapping = aes(x = totalN, 
                      y = groupPct, 
                      fill = cmasProfLevel))+
   geom_bar(stat= 'identity', 
-           position = 'stack') +
-  geom_label(aes(label = paste0(groupN, '-', scales::percent(groupPct, 2))), 
+           position = 'stack', 
+           alpha = 0.8) +
+  geom_label(aes(label = paste0(groupN, '-', scales::percent(groupPct, 1))), 
              position = position_stack(vjust = 0.5), 
              size = 5,
              show.legend = F
   ) +
+  scale_fill_manual(values = c(
+    'Exceeded' = '#317bb4', 
+    'Met'= '#1b8367', 
+    'Approached' = '#e2a331', 
+    'Partially Met' = '#e57a3c', 
+    'Did Not Yet Meet'= '#d8274a'
+                               )) +
+  facet_wrap(~planEnd) +
   labs(title = 'CMAS Performace', 
        subtitle = 'Grade 3 in 2024') +
   theme_minimal() +
   theme(axis.title = element_blank(), 
         axis.text = element_blank(), 
         legend.position = 'top', 
-        legend.title = element_blank())
+        legend.title = element_blank(), 
+        panel.grid =  element_blank())
+
+# Correlation between plan Exit in grade 3 and CMAS proficiency ----
+flagGrade3Cor <- flagStart %>% 
+  filter(gradeInt == 3, 
+         EndYear == 2024
+  ) %>% 
+  distinct(personID, planEnd)
+
+grade3ExitedCMASCor <- flagGrade3Cor %>% 
+  ungroup() %>% 
+  left_join(cmasPerformance, join_by(personID == personId)) %>% 
+  filter(!is.na(cmasProfLevel)) %>% 
+  distinct(personID, cmasProfLevel, .keep_all = T) %>% 
+  mutate(cmasProfLevel = str_remove(cmasProfLevel, ' Expectations')) %>% 
+  mutate(cmasProfLevel = case_when(
+    cmasProfLevel == 'Exceeded' ~ 5, 
+    cmasProfLevel == 'Met' ~ 4, 
+    cmasProfLevel == 'Approached' ~ 3, 
+    cmasProfLevel == 'Partially Met' ~ 2, 
+    cmasProfLevel == 'Did Not Yet Meet' ~ 1)) %>% 
+  mutate(planEnd = case_when(
+    is.na(planEnd) ~ 0, 
+    TRUE ~ 1
+  )) %>% 
+  select(planEnd, cmasProfLevel)
+
+## Create CMAS Plan Exit Correlogram ----
+cor(grade3ExitedCMASCor)
+pearsonR <- rcorr(as.matrix(grade3ExitedCMASCor), type=c("pearson"))[["r"]]
+
+#Check students with no CMAS score
+cmasNoScore <-  qryCmas %>% 
+  clean_names('lower_camel') %>% 
+  filter(contentGroupName == 'READING', 
+         grade == '3', 
+         endYear == 2024) %>% 
+  filter(is.na(proficiencyLongDescription)) %>% 
+  inner_join(flagWider, join_by(personId == personID)) 
 
 ## Explore the DIBELS performance levels of students from cohort alongside their READ Plan info ----
+### must recent DIBELS results ----
+#### Filter to English testing ----
 dibelsCombined <- dibels8Grade3 %>% 
   full_join(dibels6) %>% 
   full_join(dibelsNext)  %>% 
@@ -589,19 +653,25 @@ dibelsCombined <- dibels8Grade3 %>%
   mutate(studentTestDate = as.Date(studentTestDate), 
          studentTestDate = ymd(studentTestDate)) %>% 
   group_by(personId) %>% 
+  arrange(personId, desc(studentTestDate), endYear) %>%  # most recent testing for students with multiple
+  distinct(personId, testingPeriodNumeric, endYear, .keep_all = T) %>% 
   filter(studentTestDate == max(studentTestDate, na.rm = T)) %>%
-  filter(contentname == 'READING')
+  filter(contentname == 'READING') 
 
 flagStartFilledFlag <- flagStart %>% 
-  fill(planEnd, .direction = 'down')
+  fill(planEnd, .direction = 'updown') %>% 
+  fill(planStart, .direction = 'updown') %>% 
+  filter(EnrollmentEndDate == max(EnrollmentEndDate))
 
-dibelsWithFlag <-  dibelsCombined %>% 
-  inner_join(flagStartFilledFlag, 
-             join_by(personId == personID, 
-                     endYear == EndYear, 
-                     gradeId == gradeInt), 
+#Students with READ plan & DIBELS results & CMAS results ----
+#READ Exceptions - Exempt-NEP (9), exempt due to attendance (213), Lectura (58), iReady (10), Alt Assessment (33) 
+dibelsCmasWithFlag <-  dibelsCombined %>%
+  right_join(flagStartFilledFlag,
+             join_by(personId == personID,
+                     endYear == EndYear,
+                     gradeId == gradeInt),
              relationship = "many-to-many") %>% 
-  # filter(personId == 1557545) %>%
+  filter(!is.na(planStart)) %>% 
   mutate(planEnd = str_remove(planEnd, "^.{0,3}")) %>% 
   inner_join(cmasPerformance, by = join_by(personId)) %>%
   # filter(!is.na(planEnd)) %>%
@@ -713,7 +783,7 @@ allTestsStudentsExitDidNotMeetCMAS <- dibelsAll %>%
     )
     
 ## Create binary values for demographic variables ----
-  allEoy2024Data <- dibelsWithFlag %>% 
+  allEoy2024Data <- dibelsCmasWithFlag %>% 
     full_join(raceLookup) %>% 
     full_join(mlLookup) %>% 
     full_join(iepLookup) %>% 
@@ -724,13 +794,12 @@ allTestsStudentsExitDidNotMeetCMAS <- dibelsAll %>%
 ### Summarize plan length by student group
   allEoyLong <- allEoy2024Data %>% 
     mutate(across(c(jsel, jeffcoPk, childFind, remoteKinder), as.character)) %>% 
-      pivot_longer(cols = c(raceLabels, mlLabels, iepLabels, frlLabels, gtLabels, jsel, jeffcoPk, childFind, remoteKinder), 
+    pivot_longer(cols = c(raceLabels, mlLabels, iepLabels, frlLabels, gtLabels, jsel, jeffcoPk, childFind, remoteKinder), 
                  names_to = 'category', 
                  values_to = 'categoryValue') %>% 
-      group_by(category, categoryValue, planEnd) %>% 
-    summarize(categoryPlanLength = round(mean(studentPlanLength), 2)) %>% 
-    group_by(category, planEnd) %>% 
-    # filter(planEnd == 'Exit plan') %>% 
+    group_by(category, categoryValue, planEnd) %>%
+    reframe(categoryPlanLength = round(mean(studentPlanLength, na.rm = T), 2)) %>% 
+    filter(planEnd == 'Exit plan') %>% 
     group_by(category) %>% 
     mutate(diff = lag(categoryPlanLength) - (categoryPlanLength))
 
@@ -812,6 +881,9 @@ allTestsStudentsExitDidNotMeetCMAS <- dibelsAll %>%
     )
   
   ### Run T Test ----
+  tTestGroups <- function(.cat) {
+    
+
   allEoyGroups <- allEoy2024Data %>% 
     pivot_longer(cols = c(raceBin, mlBin, iepBin, frlBin, gtBin,jsel, jeffcoPk, childFind, remoteKinder), 
                  names_to = 'category', 
@@ -820,10 +892,54 @@ allTestsStudentsExitDidNotMeetCMAS <- dibelsAll %>%
     mutate(planEnd = ifelse(planEnd== 'Exit plan', 1, 0)) %>% 
     mutate(categoryValue = replace_na(categoryValue, 0)) %>% 
     select(category, categoryValue, planEnd) %>% 
-    filter(category == 'jsel')
+    filter(category == .cat)
   
   
   t.test(categoryValue ~ planEnd, data = allEoyGroups)
+  }
+  
+  tTestGroups(.cat= 'remoteKinder') 
+  
+  categoryValues <- c('raceBin', 'mlBin', 'iepBin', 'frlBin', 'gtBin','jsel', 'jeffcoPk', 'childFind', 'remoteKinder')
+  
+  tTtestResults <-   map(categoryValues, tTestGroups)
+  
+  pValues <- data.frame(category = categoryValues, 
+                        p = c(tTtestResults[[1]][["p.value"]], 
+                              tTtestResults[[2]][["p.value"]], 
+                              tTtestResults[[3]][["p.value"]],
+                              tTtestResults[[4]][["p.value"]],
+                              tTtestResults[[5]][["p.value"]],
+                              tTtestResults[[6]][["p.value"]],
+                              tTtestResults[[7]][["p.value"]], 
+                              tTtestResults[[8]][["p.value"]], 
+                              tTtestResults[[9]][["p.value"]])) %>% 
+    mutate(p = round(p, 4)) %>% 
+    mutate(pFlag = case_when(
+      p < 0.05 ~ 1, 
+      TRUE ~ 0
+    )) %>% 
+    mutate(category = factor(category, 
+                             levels = c( 'frlBin', 'iepBin', 'raceBin', 
+                                         'mlBin','jsel', 'jeffcoPk', 
+                                         'childFind', 'remoteKinder', 'gtBin'), 
+                             labels = c( 'FRL', 'IEP', 'Students of Color', 
+                                         'ML Program','JSEL', 'Jeffco PK', 
+                                         'ChildFind', 'Remote Kinder', 'GT'))) %>% 
+    arrange(category) %>% 
+    mutate(
+      pFlag = ifelse(pFlag == 1, "check", "x")
+    )
+  
+  
+  gt(pValues) %>% 
+    cols_label(category = 'Student Group', 
+               pFlag  = '') %>% 
+    tab_header(title = 'Percent of students who exited READ Plan by the end of grade 3', 
+               subtitle = 'with CMAS results in 2024') %>% 
+    cols_align(align = 'left', columns = category) %>% 
+    fmt_icon(columns = pFlag, 
+             fill_color = list('check' = 'green', 'x' = 'white'))
 
 # Understand student enrollment history ----
   ## Query of enrollments in Campus ----
@@ -1139,5 +1255,50 @@ AND
     tab_options(
       table.font.size = 12
     )
-
   
+  
+  # Sampling Plans ----
+  # endPlanSample <- planEndTime %>% 
+  #   mutate(personID = as.character(personID)) %>% 
+  #   pull(personID)
+  # 
+  #   sample(x = endPlanSample, 
+  #          # prob = , #a vector of probability weights for obtaining the elements of the vector being sampled.
+  #          replace = F, #If replace is false, these probabilities are applied sequentially, that is the probability of choosing the next item is proportional to the weights among the remaining items
+  #          size = 100)
+  #   
+  #   startPlanSample <- planStartTime %>% 
+  #     filter(!is.na(planStart)) %>%
+  #     distinct(personID) %>% 
+  #     pull(personID)
+  # 
+  #   sample(x = startPlanSample, 100)
+  # 
+    
+    
+    
+    allLong <- allEoy2024Data %>% 
+      mutate(across(c(jsel, jeffcoPk, childFind, remoteKinder), as.character)) %>% 
+      pivot_longer(cols = c(raceLabels, mlLabels, iepLabels, frlLabels, gtLabels, jsel, jeffcoPk, childFind, remoteKinder), 
+                   names_to = 'category', 
+                   values_to = 'categoryValue') %>% 
+      ungroup() %>% 
+      mutate(n = n_distinct(personId)) %>% 
+      select(planEnd, personId, personId, category, categoryValue, n) %>% 
+      group_by(planEnd) %>% 
+      mutate(planN = n_distinct(personId)) %>% 
+      mutate(categoryValue = replace_na(categoryValue, '0')) %>% 
+      group_by(planEnd, category, categoryValue) %>% 
+      mutate(categoryN = n_distinct(personId), 
+             categoryPct = categoryN/planN)
+    
+    
+    planEndSample <- allLong %>% 
+      filter(planEnd =='Exit plan') %>% 
+      mutate(personId = as.character(personId)) 
+    
+    sample(x = planEndSample$personId, 
+           prob = planEndSample$categoryPct , #a vector of probability weights for obtaining the elements of the vector being sampled.
+           replace = F, #If replace is false, these probabilities are applied sequentially, that is the probability of choosing the next item is proportional to the weights among the remaining items
+           size = 100)
+    
