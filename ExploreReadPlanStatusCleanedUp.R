@@ -22,6 +22,10 @@ con <- dbConnect(odbc(),
 
 sort(unique(odbcListDrivers()[[1]]))
 
+
+
+
+
 # Query of READ Plan Flag in Campus ----
 qryFlags <- odbc::dbGetQuery(con, 
                                 "
@@ -37,14 +41,28 @@ SELECT
  ,Enrollment.EndYear
  ,Enrollment.CalendarName
  ,Enrollment.EnrollmentType
+ ,studentdemographic.frlstatus
+ ,studentdemographic.calculatedlanguageproficiency
+ ,studentdemographic.gt
+ ,studentdemographic.ethnicity
+ ,studentdemographic.genderdescription as Gender
+ ,studentdemographic.iep
+ ,studentdemographic.primarydisability
+ ,studentdemographic.programtype AS ELLProgram
 FROM 
   Jeffco_IC.dbo.V_ProgramParticipation (NOLOCK)
 JOIN AchievementDW.dim.Enrollment (NOLOCK) ON 
   Enrollment.PersonID = V_ProgramParticipation.PersonID
+LEFT JOIN AchievementDW.dim.StudentDemographic WITH (NOLOCK) ON 
+  V_ProgramParticipation.PersonID = StudentDemographic.PersonID
 WHERE
  name = 'READ'
 --AND
 --V_ProgramParticipation.personID in (1523935,1522073, 1632653)
+--AND
+ -- StudentDemographic.PersonID = 2240583
+AND
+  StudentDemoGraphic.LatestRecord = 1
 AND
   V_ProgramParticipation.active = 1
 AND 
@@ -58,7 +76,73 @@ AND
 "
 )
 
-### Transform query date fields ----
+#Load Demographics Look up Tables ----
+frlLookup <- data.frame(
+  stringsAsFactors = FALSE,
+  frlstatus = c("No FRL", "Reduced Lunch", "Free Lunch"),
+  frlBin = c(0L, 1L, 1L),
+  frlLabels = c("Not Free or Reduced Lunch",
+                "Free or Reduced Lunch Eligible",
+                "Free or Reduced Lunch Eligible")
+)
+
+gtLookup <- data.frame(
+  stringsAsFactors = FALSE,
+  gt = c("GT", "Not GT"),
+  gtBin = c(1L, 0L),
+  gtLabels = c("GT", "Not GT")
+)
+
+iepLookup <- data.frame(
+  stringsAsFactors = FALSE,
+  iep = c("No IEP", "Exited IEP", "IEP"),
+  iepBin = c(0L, 0L, 1L),
+  iepLabels = c("No IEP", "No IEP", "IEP")
+)
+
+mlLookup <- data.frame(
+  stringsAsFactors = FALSE,
+  calculatedlanguageproficiency = c("Not ELL",
+                                    "NEP",
+                                    "LEP",
+                                    "FEP M1",
+                                    "FEP M2",
+                                    "FEP T3+",
+                                    "FELL",
+                                    # "PHLOTE",
+                                    "Prior to Feb 2013","FEP E1",
+                                    "FEP E2"),
+  mlBin = c(0L,1L,1L,
+            1L,1L,1L,0L,
+            # NA,
+            0L,1L,
+            1L),
+  mlLabels = c("Not ML",
+               "Multilingual Learner",
+               "Multilingual Learner",
+               "Multilingual Learner",
+               "Multilingual Learner",
+               "Multilingual Learner",
+               "Not ML",
+               "Not ML",
+               # "Not ELL",
+               "Multilingual Learner",
+               "Multilingual Learner")
+)
+
+raceLookup <-data.frame(
+  stringsAsFactors = FALSE,
+  ethnicity = c("White","Hispanic","Multi",
+                "Asian","Black","Am. Indian","Pacific Islander"),
+  raceBin = c(0L, 1L, 1L, 1L, 1L, 1L, 1L),
+  raceLabels = c("White Students",
+                 "Students of Color or Hispanic","Students of Color or Hispanic",
+                 "Students of Color or Hispanic","Students of Color or Hispanic",
+                 "Students of Color or Hispanic","Students of Color or Hispanic")
+)
+
+
+### Transform query date demos fields ----
 # filter to students of interest
 flagStart <- qryFlags %>% 
   mutate(startDate = as_date(startDate), # format as date
@@ -72,7 +156,7 @@ flagStart <- qryFlags %>%
          planEndInterval = planEndDate %within% enrollmentInterval,
          planStart = ifelse(planStartInterval == TRUE, paste0(Grade, "- Start plan"), NA), #report if plan was started
          planEnd = ifelse(planEndInterval == TRUE, paste0(Grade, "- Exit plan"), NA)) %>% #report if plan was ended
-  select(personID, Grade, CampusSchoolName, CalendarName, EnrollmentStartDate, PlanStartDate, planStart, EnrollmentEndDate, planEndDate, planEnd, EndYear, EnrollmentType) %>%
+  select(personID, Grade, CampusSchoolName, CalendarName, EnrollmentStartDate, PlanStartDate, planStart, EnrollmentEndDate, planEndDate, planEnd, EndYear, EnrollmentType, frlstatus, calculatedlanguageproficiency, gt, ethnicity, iep, primarydisability, ELLProgram) %>%
   filter(EnrollmentEndDate < '2024-06-30' | is.na(EnrollmentEndDate)) %>% #exclude enrollments in the 2025 school year
   mutate(gradeInt = case_when(
     Grade == 'K' ~ 0, 
@@ -86,7 +170,6 @@ flagStart <- qryFlags %>%
     gradeInt == 3 & EndYear == 2024 ~ 'Y', 
     TRUE ~ NA
   )) %>% 
-  # filter(EndYear > 2020) %>% 
   group_by(personID) %>% 
   fill(grade3In24, .direction = 'up') %>% 
   filter(grade3In24 == 'Y') %>% 
@@ -122,8 +205,15 @@ flagStart <- qryFlags %>%
   mutate(planStart = case_when(
     is.na(planStart) & personID == 1625455 & Grade == 'K' ~ 'K- Start plan', 
     TRUE ~ planStart
-  )) #person 1625455 started plan after enrollment end
-
+  )) %>% #person 1625455 started plan after enrollment end
+## Create binary values for demographic variables ----%>% 
+  full_join(raceLookup) %>% 
+  full_join(mlLookup) %>% 
+  full_join(iepLookup) %>% 
+  full_join(frlLookup) %>% 
+  full_join(gtLookup) %>% 
+  filter(!is.na(personID)) %>% 
+  select(-c(frlstatus, calculatedlanguageproficiency, gt, ethnicity, iep, primarydisability, ELLProgram) )
 
 ## Transform data into long format to add in summarizing ----
 flagLonger <- flagStart %>% 
@@ -392,7 +482,6 @@ SELECT
       ,studentdemographic.primarydisability
       ,studentdemographic.programtype AS ELLProgram
       ,vAcadienceStudentListPre2022.GradeID
-
 	  ,vAcadienceStudentListPre2022.ProficiencyLongDescription
 	  ,vAcadienceStudentListPre2022.TestTypeName
 	  ,vAcadienceStudentListPre2022.TestingPeriodID AS 'testingPeriodNumeric'
@@ -414,54 +503,7 @@ dibels6 <- qryOldDibels %>%
     TRUE ~ 'U'
   ))
 
-# Query Student Demograpics ----
-# It is challenging to pull READ Plan status from Enrollment. Need to careful set filters for enrollment and record dates, depending on inquiry
-# qryStuDemos <- odbc::dbGetQuery(con, 
-#                                 "
-# SELECT
-#   StudentDemographic.StudentNumber
-#   ,StudentDemographic.PersonID
-#   ,studentdemographic.[READ]
-#   ,StudentDemographic.READStatus
-#   ,Enrollment.Grade
-#   ,Enrollment.CDESchoolNumber
-#   ,Enrollment.CampusSchoolName
-#   ,Enrollment.EnrollmentStartDate
-#   ,Enrollment.EnrollmentEndDate
-#   ,StudentDemographic.RecordStartDate
-#   ,StudentDemographic.RecordEndDate
-#   ,SchoolYear.endyear     
-# FROM 
-#   AchievementDW.dim.Enrollment (NOLOCK)
-# JOIN 
-#   AchievementDW.dim.StudentDemographic (NOLOCK) ON Enrollment.PersonID = StudentDemographic.PersonID
-#   	AND (StudentDemographic.RecordEndDate BETWEEN Enrollment.EnrollmentstartDate AND Enrollment.EnrollmentEndDate
-# 		OR StudentDemographic.RecordEndDate = '9999-12-31 23:59:59.9999999')
-# --WHERE '05-26-2023' BETWEEN Enrollment.EnrollmentStartDate AND Enrollment.EnrollmentEndDate
-# --AND '05-01-2023' BETWEEN StudentDemographic.RecordStartDate AND StudentDemographic.RecordEndDate
-#   AND Enrollment.IsInvalid = 0
-#   AND StudentDemographic.IsInvalid = 0
-#   AND Enrollment.DeletedInCampus = 0
-#   AND Enrollment.LatestRecord = 1
-#   AND Enrollment.EnrollmentType = 'Primary'
-#   --AND StudentDemographic.StudentNumber = '2057918'
-# "
-# )
-# 
-# studentDemos <- qryStuDemos %>% 
-#   mutate(EnrollmentStartDate = as.Date(EnrollmentStartDate), 
-#          EnrollmentEndDate = as.Date(EnrollmentEndDate), 
-#          startDate = day(EnrollmentStartDate), 
-#          startMonth = month(EnrollmentStartDate), 
-#          startYear = year(EnrollmentStartDate), 
-#          endDate = day(EnrollmentEndDate), 
-#          endMonth = month(EnrollmentEndDate), 
-#          endYear = year(EnrollmentEndDate)) %>% 
-#   filter(startYear == 2023, 
-#          str_detect(READStatus, 'Exit')) %>% 
-#   distinct(PersonID, .keep_all = T)
-
-# Query to CMAS results ----
+# Query CMAS results ----
 qryCmas <- dbGetQuery(con, 
                        "
                   SELECT vPARCCStudentList.PersonID
@@ -678,7 +720,7 @@ dibelsCmasWithFlag <-  dibelsCombined %>%
   mutate(planEnd = replace_na(planEnd, "No exit by end of grade 3")) %>% 
   group_by(personId) %>% 
   mutate(planEndDate = replace_na(planEndDate, as.Date("2024-05-24"))) %>% 
-  mutate(studentPlanLength = interval( PlanStartDate, planEndDate,) / years(1)) %>% 
+  mutate(studentPlanLength = interval( PlanStartDate, planEndDate) / years(1)) %>% 
   ungroup() %>% 
   mutate(meanPlanLength = round(mean(studentPlanLength, na.rm = T), 2)) %>% 
   filter(testName == 'CMAS ELA Grade 03 2023-24') %>% 
@@ -717,108 +759,53 @@ allTestsStudentsExitDidNotMeetCMAS <- dibelsAll %>%
   right_join(studentsExitDidNotMeetCMAS, 
              join_by(personId == personID))
 
-#Load Demographics Lookup Tables ----
-    frlLookup <- data.frame(
-      stringsAsFactors = FALSE,
-      frlstatus = c("No FRL", "Reduced Lunch", "Free Lunch"),
-      frlBin = c(0L, 1L, 1L),
-      frlLabels = c("Not Free or Reduced Lunch",
-                 "Free or Reduced Lunch Eligible",
-                 "Free or Reduced Lunch Eligible")
-    )
-    
-    gtLookup <- data.frame(
-      stringsAsFactors = FALSE,
-      gt = c("GT", "Not GT"),
-      gtBin = c(1L, 0L),
-      gtLabels = c("GT", "Not GT")
-    )
-    
-    iepLookup <- data.frame(
-      stringsAsFactors = FALSE,
-      iep = c("No IEP", "Exited IEP", "IEP"),
-      iepBin = c(0L, 0L, 1L),
-      iepLabels = c("No IEP", "No IEP", "IEP")
-    )
-    
-    mlLookup <- data.frame(
-      stringsAsFactors = FALSE,
-      calculatedlanguageproficiency = c("Not ELL",
-                                        "NEP",
-                                        "LEP",
-                                        "FEP M1",
-                                        "FEP M2",
-                                        "FEP T3+",
-                                        "FELL",
-                                        # "PHLOTE",
-                                        "Prior to Feb 2013","FEP E1",
-                                        "FEP E2"),
-      mlBin = c(0L,1L,1L,
-                 1L,1L,1L,0L,
-                 # NA,
-                 0L,1L,
-                 1L),
-      mlLabels = c("Not ML",
-                 "Multilingual Learner",
-                 "Multilingual Learner",
-                 "Multilingual Learner",
-                 "Multilingual Learner",
-                 "Multilingual Learner",
-                 "Not ML",
-                 "Not ML",
-                 # "Not ELL",
-                 "Multilingual Learner",
-                 "Multilingual Learner")
-    )
-    
-    raceLookup <-data.frame(
-      stringsAsFactors = FALSE,
-      ethnicity = c("White","Hispanic","Multi",
-                    "Asian","Black","Am. Indian","Pacific Islander"),
-      raceBin = c(0L, 1L, 1L, 1L, 1L, 1L, 1L),
-      raceLabels = c("White Students",
-                 "Students of Color or Hispanic","Students of Color or Hispanic",
-                 "Students of Color or Hispanic","Students of Color or Hispanic",
-                 "Students of Color or Hispanic","Students of Color or Hispanic")
-    )
-    
-## Create binary values for demographic variables ----
-  allEoy2024Data <- dibelsCmasWithFlag %>% 
-    full_join(raceLookup) %>% 
-    full_join(mlLookup) %>% 
-    full_join(iepLookup) %>% 
-    full_join(frlLookup) %>% 
-    full_join(gtLookup) %>% 
-    filter(!is.na(personId))
-    
 ### Summarize plan length by student group
-  allEoyLong <- allEoy2024Data %>% 
+flagStartFilledFlag <- flagStart %>% 
+  fill(planEnd, .direction = 'updown') %>% 
+  fill(planStart, .direction = 'updown') %>% 
+  filter(EnrollmentEndDate == max(EnrollmentEndDate)) %>% 
+  mutate(planEnd = str_remove(planEnd, "^.{0,3}")) %>% 
+  mutate(planEnd = replace_na(planEnd, "No exit by end of grade 3"))
+
+  planLength <- flagStartFilledFlag %>% 
     mutate(across(c(jsel, jeffcoPk, childFind, remoteKinder), as.character)) %>% 
     pivot_longer(cols = c(raceLabels, mlLabels, iepLabels, frlLabels, gtLabels, jsel, jeffcoPk, childFind, remoteKinder), 
                  names_to = 'category', 
                  values_to = 'categoryValue') %>% 
+    mutate(categoryValue = replace_na(categoryValue, '0')) %>% 
     group_by(category, categoryValue, planEnd) %>%
-    reframe(categoryPlanLength = round(mean(studentPlanLength, na.rm = T), 2)) %>% 
+    filter(!is.na(planStart)) %>%
+    # mutate(planEnd = str_remove(planEnd, "^.{0,3}")) %>% 
+    # mutate(planEnd = replace_na(planEnd, "No exit by end of grade 3")) %>% 
+    group_by(personID) %>% 
+    mutate(planEndDate = replace_na(planEndDate, as.Date("2024-05-24"))) %>% 
+    mutate(studentPlanLength = interval(PlanStartDate, planEndDate) %/% months(1)) %>% 
+    ungroup() %>% 
+    mutate(meanPlanLength = round(mean(studentPlanLength, na.rm = T), 0)) %>% 
+    group_by(planEnd) %>% 
+    mutate(meanPlanLengthEnd = round(mean(studentPlanLength, na.rm = T), 0)) %>% 
+    group_by(category, categoryValue, planEnd) %>% 
+    reframe(categoryPlanLength = round(mean(studentPlanLength, na.rm = T), 0)) %>% 
     filter(planEnd == 'Exit plan') %>% 
     group_by(category) %>% 
-    mutate(diff = lag(categoryPlanLength) - (categoryPlanLength))
+    mutate(diff = lag(categoryPlanLength) - (categoryPlanLength)) 
 
   ### Summarize student groups by exit status ----
   
-  allEoyGroupSummary <- allEoy2024Data %>% 
+  allEoyGroupSummary <- flagStartFilledFlag %>% 
     pivot_longer(cols = c(raceBin, mlBin, iepBin, frlBin, gtBin,jsel, jeffcoPk, childFind, remoteKinder), 
                  names_to = 'category', 
                  values_to = 'categoryValue') %>% 
     ungroup() %>% 
-    mutate(n = n_distinct(personId)) %>% 
+    mutate(n = n_distinct(personID)) %>% 
     group_by(planEnd) %>% 
-    mutate(planN = n_distinct(personId)) %>% 
+    mutate(planN = n_distinct(personID)) %>% 
     group_by(category, categoryValue) %>% 
-    mutate(categoryN = n_distinct(personId)) %>% 
+    mutate(categoryN = n_distinct(personID)) %>% 
     group_by(category, categoryValue, planEnd) %>% 
     summarise(n = first(n), 
               planN = first(planN),
-              groupN = n_distinct(personId),
+              groupN = n_distinct(personID),
               categoryN = first(categoryN),
               groupPct = groupN/categoryN
               )  %>% 
@@ -884,7 +871,7 @@ allTestsStudentsExitDidNotMeetCMAS <- dibelsAll %>%
   tTestGroups <- function(.cat) {
     
 
-  allEoyGroups <- allEoy2024Data %>% 
+  allEoyGroups <- flagStartFilledFlag %>% 
     pivot_longer(cols = c(raceBin, mlBin, iepBin, frlBin, gtBin,jsel, jeffcoPk, childFind, remoteKinder), 
                  names_to = 'category', 
                  values_to = 'categoryValue') %>% 
@@ -934,118 +921,120 @@ allTestsStudentsExitDidNotMeetCMAS <- dibelsAll %>%
   
   gt(pValues) %>% 
     cols_label(category = 'Student Group', 
-               pFlag  = '') %>% 
+               p = 'p-value',
+               pFlag  = ' ') %>% 
     tab_header(title = 'Percent of students who exited READ Plan by the end of grade 3', 
                subtitle = 'with CMAS results in 2024') %>% 
     cols_align(align = 'left', columns = category) %>% 
     fmt_icon(columns = pFlag, 
-             fill_color = list('check' = 'green', 'x' = 'white'))
+             fill_color = list('check' = 'grey', 'x' = 'white')) %>% 
+    tab_footnote(footnote =  md(glue::glue("{fontawesome::fa('check')} = Significant difference")))
 
 # Understand student enrollment history ----
   ## Query of enrollments in Campus ----
-  qryFlagsEnrollmentOverTime <- odbc::dbGetQuery(con, 
-                               "
-SELECT
-V_ProgramParticipation.personID
- ,Enrollment.Grade
- ,Enrollment.CampusSchoolName
- ,Enrollment.EnrollmentStartDate
- ,Enrollment.EnrollmentEndDate
- ,Enrollment.EndYear
- ,Enrollment.CalendarName
- ,Enrollment.EnrollmentType
-FROM 
-  Jeffco_IC.dbo.V_ProgramParticipation (NOLOCK)
-JOIN AchievementDW.dim.Enrollment (NOLOCK) ON 
-  Enrollment.PersonID = V_ProgramParticipation.PersonID
-WHERE
- name = 'READ'
-AND
-  V_ProgramParticipation.active = 1
-AND 
-  Enrollment.DeletedInCampus = 0
-AND 
-  Enrollment.LatestRecord = 1
-"
-  )
-  
-  ### Transform query date fields ----
-  # filter to students of interest
-  flagWithEnrollment <- qryFlagsEnrollmentOverTime %>% 
-    mutate(startDate = as_date(EnrollmentStartDate), # format as date
-           endDate = as_date(EnrollmentEndDate),
-           EnrollmentStartDate = ymd(EnrollmentStartDate), 
-           EnrollmentEndDate = ymd(EnrollmentEndDate)) %>%  #create time interval) 
-    select(personID, Grade, CampusSchoolName, CalendarName, EnrollmentStartDate, EnrollmentEndDate,EnrollmentType, EndYear) %>%
-    filter(EnrollmentEndDate < '2024-06-30' | is.na(EnrollmentEndDate)) %>% #exclude enrollments in the 2025 school year
-    mutate(gradeInt = case_when(
-      Grade == 'K' ~ 0, 
-      Grade == 'PK' ~ -1, 
-      Grade == 'It' ~ -2, 
-      TRUE ~ as.numeric(Grade)
-    )) %>% # convert grade grade to numeric value to arrange/sort by
-    filter(gradeInt < 4) %>% 
-    arrange(personID, gradeInt, desc(EnrollmentStartDate), desc(EnrollmentEndDate)) %>% 
-    mutate(grade3In24 = case_when(
-      gradeInt == 3 & EndYear == 2024 ~ 'Y', 
-      TRUE ~ NA
-    )) %>% 
-    # filter(EndYear > 2020) %>% 
-    group_by(personID) %>% 
-    fill(grade3In24, .direction = 'up') %>% 
-    filter(grade3In24 == 'Y') %>% 
-    mutate(jeffcoPk = case_when(
-      Grade =='PK' | Grade == 'It' ~ 1,
-      TRUE ~ NA
-    )) %>% 
-    arrange(personID, EnrollmentStartDate) %>% 
-    fill(jeffcoPk, .direction = 'down') %>% 
-    mutate(enrollmentLength = EnrollmentEndDate -EnrollmentStartDate) %>% 
-    filter(enrollmentLength > 10) %>% 
-    mutate(jsel = str_detect(CalendarName, 'SEL')) %>% 
-    mutate(remoteKinder = case_when(
-      str_detect(CalendarName, 'RL') & EnrollmentType == 'Primary' & EndYear == 2021 ~ 1, 
-      TRUE ~ NA_real_)) %>% 
-    select(personID, Grade, gradeInt, CalendarName, EndYear, jeffcoPk, enrollmentLength, jsel, remoteKinder) %>% 
-    arrange(personID, desc(jeffcoPk)) %>% 
-    fill(jeffcoPk, .direction = 'down') %>% 
-    mutate(jsel = case_when(
-      jsel == FALSE ~ NA_real_, 
-      TRUE ~ 1
-    )) %>% 
-    arrange(personID, desc(jsel)) %>% 
-    fill(jsel, .direction = 'down') %>% 
-    arrange(personID, desc(remoteKinder)) %>% 
-    fill(remoteKinder, .direction = 'down') %>% 
-    group_by(personID, jeffcoPk, jsel, remoteKinder) %>% 
-    summarise() %>% 
-    pivot_longer(cols = jeffcoPk:remoteKinder, 
-                 names_to = 'program', 
-                 values_to = 'programValue') 
-    
-  
-  ### Summarize plan length by student group
-  allEoyDemos <- allEoy2024Data %>% 
-    pivot_longer(cols = c(raceLabels, mlLabels, iepLabels, frlLabels, gtLabels), 
-                 names_to = 'category', 
-                 values_to = 'categoryValue') %>% 
-    ungroup() %>% 
-    select(personId, planEnd)
-
-  allDemosPrograms <- allEoyDemos %>% 
-    left_join(flagWithEnrollment, 
-               join_by(personId == personID), 
-               relationship = "many-to-many") %>% 
-    ungroup() %>% 
-    mutate(n = n_distinct(personId)) %>% 
-    group_by(planEnd) %>% 
-    mutate(planN = n_distinct(personId)) %>% 
-    group_by(program, programValue, planEnd) %>% 
-    summarise(n = first(n), 
-              planN = first(planN),
-              groupN = n_distinct(personId), 
-              groupPct = groupN/planN) %>% 
-    filter(programValue == 1)
+#   qryFlagsEnrollmentOverTime <- odbc::dbGetQuery(con, 
+#                                "
+# SELECT
+# V_ProgramParticipation.personID
+#  ,Enrollment.Grade
+#  ,Enrollment.CampusSchoolName
+#  ,Enrollment.EnrollmentStartDate
+#  ,Enrollment.EnrollmentEndDate
+#  ,Enrollment.EndYear
+#  ,Enrollment.CalendarName
+#  ,Enrollment.EnrollmentType
+# FROM 
+#   Jeffco_IC.dbo.V_ProgramParticipation (NOLOCK)
+# JOIN AchievementDW.dim.Enrollment (NOLOCK) ON 
+#   Enrollment.PersonID = V_ProgramParticipation.PersonID
+# WHERE
+#  name = 'READ'
+# AND
+#   V_ProgramParticipation.active = 1
+# AND 
+#   Enrollment.DeletedInCampus = 0
+# AND 
+#   Enrollment.LatestRecord = 1
+# "
+#   )
+#   
+#   ### Transform query date fields ----
+#   # filter to students of interest
+#   flagWithEnrollment <- qryFlagsEnrollmentOverTime %>% 
+#     mutate(startDate = as_date(EnrollmentStartDate), # format as date
+#            endDate = as_date(EnrollmentEndDate),
+#            EnrollmentStartDate = ymd(EnrollmentStartDate), 
+#            EnrollmentEndDate = ymd(EnrollmentEndDate)) %>%  #create time interval) 
+#     select(personID, Grade, CampusSchoolName, CalendarName, EnrollmentStartDate, EnrollmentEndDate,EnrollmentType, EndYear) %>%
+#     filter(EnrollmentEndDate < '2024-06-30' | is.na(EnrollmentEndDate)) %>% #exclude enrollments in the 2025 school year
+#     mutate(gradeInt = case_when(
+#       Grade == 'K' ~ 0, 
+#       Grade == 'PK' ~ -1, 
+#       Grade == 'It' ~ -2, 
+#       TRUE ~ as.numeric(Grade)
+#     )) %>% # convert grade grade to numeric value to arrange/sort by
+#     filter(gradeInt < 4) %>% 
+#     arrange(personID, gradeInt, desc(EnrollmentStartDate), desc(EnrollmentEndDate)) %>% 
+#     mutate(grade3In24 = case_when(
+#       gradeInt == 3 & EndYear == 2024 ~ 'Y', 
+#       TRUE ~ NA
+#     )) %>% 
+#     # filter(EndYear > 2020) %>% 
+#     group_by(personID) %>% 
+#     fill(grade3In24, .direction = 'up') %>% 
+#     filter(grade3In24 == 'Y') %>% 
+#     mutate(jeffcoPk = case_when(
+#       Grade =='PK' | Grade == 'It' ~ 1,
+#       TRUE ~ NA
+#     )) %>% 
+#     arrange(personID, EnrollmentStartDate) %>% 
+#     fill(jeffcoPk, .direction = 'down') %>% 
+#     mutate(enrollmentLength = EnrollmentEndDate -EnrollmentStartDate) %>% 
+#     filter(enrollmentLength > 10) %>% 
+#     mutate(jsel = str_detect(CalendarName, 'SEL')) %>% 
+#     mutate(remoteKinder = case_when(
+#       str_detect(CalendarName, 'RL') & EnrollmentType == 'Primary' & EndYear == 2021 ~ 1, 
+#       TRUE ~ NA_real_)) %>% 
+#     select(personID, Grade, gradeInt, CalendarName, EndYear, jeffcoPk, enrollmentLength, jsel, remoteKinder) %>% 
+#     arrange(personID, desc(jeffcoPk)) %>% 
+#     fill(jeffcoPk, .direction = 'down') %>% 
+#     mutate(jsel = case_when(
+#       jsel == FALSE ~ NA_real_, 
+#       TRUE ~ 1
+#     )) %>% 
+#     arrange(personID, desc(jsel)) %>% 
+#     fill(jsel, .direction = 'down') %>% 
+#     arrange(personID, desc(remoteKinder)) %>% 
+#     fill(remoteKinder, .direction = 'down') %>% 
+#     group_by(personID, jeffcoPk, jsel, remoteKinder) %>% 
+#     summarise() %>% 
+#     pivot_longer(cols = jeffcoPk:remoteKinder, 
+#                  names_to = 'program', 
+#                  values_to = 'programValue') 
+#     
+#   
+#   ### Summarize plan length by student group
+#   allEoyDemos <- allEoy2024Data %>% 
+#     pivot_longer(cols = c(raceLabels, mlLabels, iepLabels, frlLabels, gtLabels), 
+#                  names_to = 'category', 
+#                  values_to = 'categoryValue') %>% 
+#     ungroup() %>% 
+#     select(personId, planEnd)
+# 
+#   allDemosPrograms <- allEoyDemos %>% 
+#     left_join(flagWithEnrollment, 
+#                join_by(personId == personID), 
+#                relationship = "many-to-many") %>% 
+#     ungroup() %>% 
+#     mutate(n = n_distinct(personId)) %>% 
+#     group_by(planEnd) %>% 
+#     mutate(planN = n_distinct(personId)) %>% 
+#     group_by(program, programValue, planEnd) %>% 
+#     summarise(n = first(n), 
+#               planN = first(planN),
+#               groupN = n_distinct(personId), 
+#               groupPct = groupN/planN) %>% 
+#     filter(programValue == 1)
   
 # What time of the year of plans tend to start?----  
   planStartTime <- flagStart %>% 
