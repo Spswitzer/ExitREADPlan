@@ -1260,7 +1260,7 @@ gt(planLength) %>%
     group_by(category, categoryValue) %>% 
     mutate(categoryN = n_distinct(personID)) %>% 
     group_by(category, categoryValue, planEnd) %>% 
-    filter(planEnd %in% c('3- Exit plan', NA)) %>% #only grade 3 to inform potential interviews
+    # filter(planEnd %in% c('3- Exit plan', NA)) %>% #only grade 3 to inform potential interviews
     mutate(planEnd = replace_na(planEnd, '0')) %>% 
     mutate(categoryValue = replace_na(categoryValue, 0)) %>% 
     select(personID, category, categoryValue, planEnd) %>% 
@@ -1275,17 +1275,92 @@ gt(planLength) %>%
              categoryPct = categoryN/planN)
     
     planEndSample <- groupSummary %>% 
-      filter(planEnd == '3- Exit plan') %>% 
-      mutate(personID = as.character(personID)) 
+      filter(planEnd %in% c( '3- Exit plan', '2- Exit plan', '1- Exit plan')) %>% 
+      mutate(personID = as.character(personID)) %>% 
+      group_by(category) %>% 
+      slice_sample(n = 50, 
+                   replace= T)
     
-    sample(x = planEndSample$personID, 
+sample <- sample(x = planEndSample$personID, 
            prob = planEndSample$categoryPct , #a vector of probability weights for obtaining the elements of the vector being sampled.
            replace = F, #If replace is false, these probabilities are applied sequentially, that is the probability of choosing the next item is proportional to the weights among the remaining items
-           size = 50)
+           size = (nrow(planEndSample)/9) * .33) # nine categories
+
+planEndSampled <- planEndSample %>% 
+  filter(personID %in% sample, 
+         category == 'raceBin')
 
 # Attach Student to Teacher ----
+    library(DBI)
+    library(odbc)
+    library(janitor)
+    library(tidyverse)
+    # Create connection to databases ----
+    con <- odbc::dbConnect(odbc(),  
+                           Driver = "SQL Server",  
+                           Server = "qdc-soars-test",  
+                           trusted_connection = "true",                    
+                           Port = 1433)  
     
-  studentExitGrade3 <- flagStart %>% 
+    sort(unique(odbcListDrivers()[[1]])) 
+    
+    qryStudentRoster <- dbGetQuery(con, "
+SELECT DISTINCT	
+Course.homeroom
+,Course.courseID
+,Course.name
+,Section.sectionID
+,Section.number
+,Section.teacherDisplay
+,TeacherSection.TeacherName
+,Section.homeroomSection
+,SectionStudent.SchoolName
+,Roster.personID
+,StudentDemographic.LegalFirstName
+,StudentDemographic.LegalLastName
+,Enrollment.EnrollmentEndDate
+,Enrollment.EndYear
+,Enrollment.Grade
+FROM Jeffco_IC.dbo.Course WITH (NOLOCK)
+LEFT JOIN jeffco_IC.dbo.Section (nolock) ON 
+  Course.courseID = Section.courseID
+LEFT JOIN jeffco_IC.dbo.Roster (nolock) ON 
+  Section.sectionID = Roster.SectionID
+LEFT JOIN AchievementDW.dim.StudentDemographic (nolock) ON 
+Roster.personID = StudentDemographic.PersonID 
+LEFT JOIN AchievementDW.dim.SectionStudent (NOLOCK) ON 
+  Roster.personID = SectionStudent.personID 
+LEFT JOIN AchievementDW.dim.Enrollment WITH (NOLOCK) ON 
+  SectionStudent.EnrollmentID = Enrollment.EnrollmentID AND 
+  SectionStudent.PersonID = Enrollment.PersonID
+LEFT JOIN AchievementDW.Dim.TeacherSection WITH (NOLOCK) ON 
+  Roster.sectionID = TeacherSection.SectionID
+WHERE COURSE.homeroom = 'TRUE'
+AND course.active = 'TRUE'
+AND Section.homeroomSection = 'TRUE'
+AND	SectionStudent.IsInvalid = 0
+AND StudentDemographic.IsInvalid = 0
+AND
+  StudentDemographic.LatestRecord = 1
+AND
+  Course.name = 'Homeroom 3'
+AND
+  Enrollment.EndYear = 2024
+AND 
+  Enrollment.Grade = '3'
+--AND
+ -- Roster.PersonID = 2240583 -- student will not show end year teacher
+AND
+  TeacherSection.PrimaryTeacherFlag = 1
+AND	Enrollment.LatestRecord = 1
+AND	StudentDemographic.LatestRecord = 1
+AND Enrollment.EnrollmentType = 'Primary'
+--AND
+--Enrollment.EndStatus = ''
+"
+)
+
+studentExitGrade3 <- flagStart %>% 
     select(personID, Grade, planStart, planEnd) %>% 
     pivot_longer(c(planStart, planEnd), 
                   names_to = 'status') %>% 
