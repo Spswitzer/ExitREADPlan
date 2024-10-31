@@ -39,12 +39,19 @@ Course.homeroom
 ,Enrollment.EndYear
 ,Enrollment.Grade
 FROM Jeffco_IC.dbo.Course WITH (NOLOCK)
-INNER JOIN jeffco_IC.dbo.Section (nolock) on Course.courseID = Section.courseID
-INNER JOIN jeffco_IC.dbo.Roster (nolock) on Section.sectionID = Roster.SectionID
-INNER JOIN AchievementDW.dim.StudentDemographic (nolock) ON Roster.personID = StudentDemographic.PersonID 
-INNER JOIN AchievementDW.dim.SectionStudent (NOLOCK) on Roster.personID = SectionStudent.personID
-INNER JOIN AchievementDW.dim.Enrollment WITH (NOLOCK) ON SectionStudent.EnrollmentID = Enrollment.EnrollmentID
-INNER JOIN AchievementDW.Dim.TeacherSection WITH (NOLOCK) on Roster.sectionID = TeacherSection.SectionID
+LEFT JOIN jeffco_IC.dbo.Section (nolock) ON 
+  Course.courseID = Section.courseID
+LEFT JOIN jeffco_IC.dbo.Roster (nolock) ON 
+  Section.sectionID = Roster.SectionID
+LEFT JOIN AchievementDW.dim.StudentDemographic (nolock) ON 
+Roster.personID = StudentDemographic.PersonID 
+LEFT JOIN AchievementDW.dim.SectionStudent (NOLOCK) ON 
+  Roster.personID = SectionStudent.personID 
+LEFT JOIN AchievementDW.dim.Enrollment WITH (NOLOCK) ON 
+  SectionStudent.EnrollmentID = Enrollment.EnrollmentID AND 
+  SectionStudent.PersonID = Enrollment.PersonID
+LEFT JOIN AchievementDW.Dim.TeacherSection WITH (NOLOCK) ON 
+  Roster.sectionID = TeacherSection.SectionID
 WHERE COURSE.homeroom = 'TRUE'
 AND course.active = 'TRUE'
 AND Section.homeroomSection = 'TRUE'
@@ -59,12 +66,13 @@ AND
 AND 
   Enrollment.Grade = '3'
 --AND
---  Roster.PersonID = 2240583 -- student will not show end year teacher
+ -- Roster.PersonID = 2240583 -- student will not show end year teacher
 AND
   TeacherSection.PrimaryTeacherFlag = 1
 AND	Enrollment.LatestRecord = 1
 AND	StudentDemographic.LatestRecord = 1
 AND Enrollment.EnrollmentType = 'Primary'
-
+--AND
+--Enrollment.EndStatus = ''
 "
 )
