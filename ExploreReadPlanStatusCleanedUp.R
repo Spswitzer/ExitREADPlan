@@ -22,10 +22,6 @@ con <- dbConnect(odbc(),
 
 sort(unique(odbcListDrivers()[[1]]))
 
-
-
-
-
 # Query of READ Plan Flag in Campus ----
 qryFlags <- odbc::dbGetQuery(con, 
                                 "
@@ -1390,3 +1386,204 @@ studentExitGrade3 <- flagStart %>%
     reframe(n =n()) %>% 
     arrange(desc(n)) %>% 
     head(15)
+
+  # Total Students in Cohort ----
+  # Query of READ Plan Flag in Campus ----
+  qryNoFlags <- odbc::dbGetQuery(con, 
+                               "
+SELECT
+-- V_ProgramParticipation.name
+-- ,V_ProgramParticipation.personID
+-- ,V_ProgramParticipation.startDate
+-- ,V_ProgramParticipation.endDate
+  Enrollment.PersonID
+ ,Enrollment.Grade
+ ,Enrollment.CampusSchoolName
+ ,Enrollment.EnrollmentStartDate
+ ,Enrollment.EnrollmentEndDate
+ ,Enrollment.EndYear
+ ,Enrollment.CalendarName
+ ,Enrollment.EnrollmentType
+ ,studentdemographic.frlstatus
+ ,studentdemographic.calculatedlanguageproficiency
+ ,studentdemographic.gt
+ ,studentdemographic.ethnicity
+ ,studentdemographic.genderdescription as Gender
+ ,studentdemographic.iep
+ ,studentdemographic.primarydisability
+ ,studentdemographic.programtype AS ELLProgram
+FROM 
+AchievementDW.dim.Enrollment (NOLOCK) 
+LEFT JOIN AchievementDW.dim.StudentDemographic WITH (NOLOCK) ON 
+  Enrollment.PersonID = StudentDemographic.PersonID
+WHERE
+-- name = 'READ'
+--AND
+--V_ProgramParticipation.personID in (1523935,1522073, 1632653)
+--AND
+ -- StudentDemographic.PersonID = 2240583
+--AND
+  StudentDemoGraphic.LatestRecord = 1
+--AND
+--  V_ProgramParticipation.active = 1
+AND 
+  Enrollment.DeletedInCampus = 0
+AND 
+  Enrollment.LatestRecord = 1
+--AND 
+ -- Enrollment.EnrollmentType = 'Primary'
+--AND 
+ -- endDate > '2024-01-01 00:00:00'
+"
+  )
+## Transform Data to attach demos ----
+  flagStartNoFlag <- qryNoFlags %>% 
+    mutate(EnrollmentStartDate = ymd(EnrollmentStartDate), 
+           EnrollmentEndDate = ymd(EnrollmentEndDate),
+           enrollmentInterval = interval(EnrollmentStartDate, EnrollmentEndDate), #create time interval
+           ) %>% #report if plan was ended
+    select(personID = PersonID, Grade, CampusSchoolName, CalendarName, EnrollmentStartDate, EnrollmentEndDate, 
+           EndYear, EnrollmentType, frlstatus, calculatedlanguageproficiency, gt, ethnicity, iep, primarydisability, ELLProgram) %>%
+    filter(EnrollmentEndDate < '2024-06-30' | is.na(EnrollmentEndDate)) %>% #exclude enrollments in the 2025 school year
+    mutate(gradeInt = case_when(
+      Grade == 'K' ~ 0, 
+      Grade == 'PK' ~ -1, 
+      Grade == 'It' ~ -2, 
+      TRUE ~ as.numeric(Grade)
+    )) %>% # convert grade grade to numeric value to arrange/sort by
+    filter(gradeInt < 4) %>% 
+    arrange(personID, gradeInt, desc(EnrollmentStartDate), desc(EnrollmentEndDate)) %>% 
+    mutate(grade3In24 = case_when(
+      gradeInt == 3 & EndYear == 2024 ~ 'Y', 
+      TRUE ~ NA
+    )) %>% 
+    group_by(personID) %>% 
+    fill(grade3In24, .direction = 'up') %>% 
+    filter(grade3In24 == 'Y') %>% 
+    #calculate summer programming and PK
+    mutate(jeffcoPk = case_when(
+      str_detect(CalendarName, 'PK') & !str_detect(CalendarName, 'Child Find') ~ 1,
+      TRUE ~ NA_real_)) %>% 
+    arrange(personID, EnrollmentStartDate) %>% 
+    fill(jeffcoPk, .direction = 'down') %>% 
+    mutate(enrollmentLength = EnrollmentEndDate - EnrollmentStartDate) %>% 
+    filter(enrollmentLength > 10) %>% 
+    mutate(jsel = str_detect(CalendarName, 'SEL')) %>% 
+    mutate(remoteKinder = case_when(
+      str_detect(CalendarName, 'RL') & EnrollmentType == 'Primary' & EndYear == 2021 ~ 1, 
+      TRUE ~ NA_real_)) %>% 
+    arrange(personID, desc(jeffcoPk)) %>% 
+    fill(jeffcoPk, .direction = 'down') %>% 
+    mutate(jsel = case_when(
+      jsel == FALSE ~ NA_real_, 
+      TRUE ~ 1
+    )) %>% 
+    mutate(childFind = case_when(
+      str_detect(CalendarName, 'Child Find') ~ 1, 
+      TRUE ~ NA_real_
+    )) %>% 
+    arrange(personID, desc(jsel)) %>% 
+    fill(jsel, .direction = 'down') %>% 
+    arrange(personID, desc(remoteKinder)) %>% 
+    fill(remoteKinder, .direction = 'down') %>% 
+    arrange(personID, desc(childFind)) %>% 
+    fill(childFind, .direction = 'down') %>% 
+    filter(EnrollmentType == 'Primary') %>% 
+    #Create binary values for demographic variables
+    full_join(raceLookup) %>% 
+    full_join(mlLookup) %>% 
+    full_join(iepLookup) %>% 
+    full_join(frlLookup) %>% 
+    full_join(gtLookup) %>% 
+    filter(!is.na(personID)) %>% 
+    select(-c(frlstatus, calculatedlanguageproficiency, gt, ethnicity, iep, primarydisability, ELLProgram) )
+  
+  ## Summarize cohort -----
+  noFlagSummary <- flagStartNoFlag %>% 
+    arrange(personID, desc(EnrollmentEndDate)) %>% 
+    distinct(personID, .keep_all = T) %>% 
+    ungroup() %>% 
+    reframe(totalN = n()) 
+  
+  ### pull students in Cohort to join for CMAS analysis ----
+  noFlagSummaryIds <- flagStartNoFlag %>% 
+    arrange(personID, desc(EnrollmentEndDate)) %>% 
+    distinct(personID) 
+  
+  ### pull students with plan to filter join for CMAS analysis ----
+  studentsWithPlan <- flagLonger %>% 
+    distinct(personID, .keep_all = T) 
+  
+  ### filter join to access students Never on plan ----
+  neverOnPlan <- noFlagSummaryIds %>% 
+    anti_join(studentsWithPlan)
+  
+  
+  neverOnPlan <- cmasPerformance %>% 
+    right_join(neverOnPlan, join_by(personId == personID)) %>% 
+    mutate(n = n_distinct(personId)) %>% 
+    group_by(cmasProfLevel) %>% 
+    mutate(profN = n(), 
+           profPct = profN/n) 
+  
+  ### Explore the CMAS performance levels of students Never on READ Plan ----
+  #### Plot summary of CMAS performance for exited students ----
+  grade3NoPlanCMAS <- neverOnPlan %>% 
+    ungroup() %>% 
+    left_join(cmasPerformance, join_by(personID == personId)) %>% 
+    filter(!is.na(cmasProfLevel)) %>% 
+    distinct(personID, cmasProfLevel, .keep_all = T) %>% 
+    mutate(totalN = n()) %>% 
+    group_by(cmasProfLevel) %>% 
+    reframe(groupN = n(), 
+            totalN = first(totalN),
+            groupPct = round(groupN/totalN,4)) %>% 
+    mutate(cmasProfLevel = str_remove(cmasProfLevel, ' Expectations')) %>% 
+    mutate(cmasProfLevel = factor(cmasProfLevel, 
+                                  levels= c('Exceeded', 
+                                            'Met', 
+                                            'Approached', 
+                                            'Partially Met', 
+                                            'Did Not Yet Meet'))) 
+  
+  ggplot(data = grade3NoPlanCMAS, 
+         mapping = aes(x = totalN, 
+                       y = groupPct, 
+                       fill = cmasProfLevel))+
+    geom_bar(stat= 'identity', 
+             position = 'stack', 
+             alpha = 0.8) +
+    geom_label(aes(label = paste0(groupN, '-', scales::percent(groupPct, 1))), 
+               position = position_stack(vjust = 0.5), 
+               size = 4,
+               show.legend = F
+    ) +
+    scale_fill_manual(values = c(
+      'Exceeded' = '#317bb4', 
+      'Met'= '#1b8367', 
+      'Approached' = '#e2a331', 
+      'Partially Met' = '#e57a3c', 
+      'Did Not Yet Meet'= '#d8274a'
+    )) +
+    labs(title = 'CMAS Performace', 
+         subtitle = 'Grade 3 in 2024') +
+    theme_minimal() +
+    theme(axis.title = element_blank(), 
+          axis.text = element_blank(), 
+          legend.position = 'top', 
+          legend.title = element_blank(), 
+          panel.grid =  element_blank())
+  
+  #### Explore students never on READ Plan with Low CMAS Performance -----
+  grade3NoPlanCMASLo <- neverOnPlan %>% 
+    ungroup() %>% 
+    left_join(cmasPerformance, join_by(personID == personId)) %>% 
+    filter(cmasProfLevel == 'Did Not Yet Meet Expectations') %>% 
+    pull(personID)
+  
+  
+  loCmasDibels <- dibelsCombined %>% 
+    filter(personId %in% grade3NoPlanCMASLo, 
+           readstatus != 'READ Plan') %>% 
+    filter(proficiencyLongDescription == 'Well Below Benchmark')
+  
