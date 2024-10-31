@@ -23,54 +23,59 @@ con <- dbConnect(odbc(),
 sort(unique(odbcListDrivers()[[1]]))
 
 # Query of READ Plan Flag in Campus ----
-qryFlags <- odbc::dbGetQuery(con, 
-                                "
-SELECT
- V_ProgramParticipation.name
- ,V_ProgramParticipation.personID
- ,V_ProgramParticipation.startDate
- ,V_ProgramParticipation.endDate
- ,Enrollment.Grade
- ,Enrollment.CampusSchoolName
- ,Enrollment.EnrollmentStartDate
- ,Enrollment.EnrollmentEndDate
- ,Enrollment.EndYear
- ,Enrollment.CalendarName
- ,Enrollment.EnrollmentType
- ,studentdemographic.frlstatus
- ,studentdemographic.calculatedlanguageproficiency
- ,studentdemographic.gt
- ,studentdemographic.ethnicity
- ,studentdemographic.genderdescription as Gender
- ,studentdemographic.iep
- ,studentdemographic.primarydisability
- ,studentdemographic.programtype AS ELLProgram
-FROM 
-  Jeffco_IC.dbo.V_ProgramParticipation (NOLOCK)
-JOIN AchievementDW.dim.Enrollment (NOLOCK) ON 
-  Enrollment.PersonID = V_ProgramParticipation.PersonID
-LEFT JOIN AchievementDW.dim.StudentDemographic WITH (NOLOCK) ON 
-  V_ProgramParticipation.PersonID = StudentDemographic.PersonID
-WHERE
- name = 'READ'
---AND
---V_ProgramParticipation.personID in (1523935,1522073, 1632653)
---AND
- -- StudentDemographic.PersonID = 2240583
-AND
-  StudentDemoGraphic.LatestRecord = 1
-AND
-  V_ProgramParticipation.active = 1
-AND 
-  Enrollment.DeletedInCampus = 0
-AND 
-  Enrollment.LatestRecord = 1
---AND 
- -- Enrollment.EnrollmentType = 'Primary'
---AND 
- -- endDate > '2024-01-01 00:00:00'
-"
-)
+# qryFlags <- odbc::dbGetQuery(con, 
+#                                 "
+# SELECT
+#  V_ProgramParticipation.name
+#  ,V_ProgramParticipation.personID
+#  ,V_ProgramParticipation.startDate
+#  ,V_ProgramParticipation.endDate
+#  ,Enrollment.Grade
+#  ,Enrollment.CampusSchoolName
+#  ,Enrollment.EnrollmentStartDate
+#  ,Enrollment.EnrollmentEndDate
+#  ,Enrollment.EndYear
+#  ,Enrollment.CalendarName
+#  ,Enrollment.EnrollmentType
+#  ,studentdemographic.frlstatus
+#  ,studentdemographic.calculatedlanguageproficiency
+#  ,studentdemographic.gt
+#  ,studentdemographic.ethnicity
+#  ,studentdemographic.genderdescription as Gender
+#  ,studentdemographic.iep
+#  ,studentdemographic.primarydisability
+#  ,studentdemographic.programtype AS ELLProgram
+# FROM 
+#   Jeffco_IC.dbo.V_ProgramParticipation (NOLOCK)
+# JOIN AchievementDW.dim.Enrollment (NOLOCK) ON 
+#   Enrollment.PersonID = V_ProgramParticipation.PersonID
+# LEFT JOIN AchievementDW.dim.StudentDemographic WITH (NOLOCK) ON 
+#   V_ProgramParticipation.PersonID = StudentDemographic.PersonID
+# WHERE
+#  name = 'READ'
+# --AND
+# --V_ProgramParticipation.personID in (1523935,1522073, 1632653)
+# --AND
+#  -- StudentDemographic.PersonID = 2240583
+# AND
+#   StudentDemoGraphic.LatestRecord = 1
+# AND
+#   V_ProgramParticipation.active = 1
+# AND 
+#   Enrollment.DeletedInCampus = 0
+# AND 
+#   Enrollment.LatestRecord = 1
+# --AND 
+#  -- Enrollment.EnrollmentType = 'Primary'
+# --AND 
+#  -- endDate > '2024-01-01 00:00:00'
+# "
+# )
+
+# saveRDS(qryFlags, 'data/qryFlags.rds')
+
+qryFlags <- 
+  readRDS('data/qryFlags.rds')
 
 #Load Demographics Look up Tables ----
 frlLookup <- data.frame(
