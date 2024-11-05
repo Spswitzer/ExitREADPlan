@@ -23,59 +23,59 @@ con <- dbConnect(odbc(),
 sort(unique(odbcListDrivers()[[1]]))
 
 # Query of READ Plan Flag in Campus ----
-# qryFlags <- odbc::dbGetQuery(con, 
-#                                 "
-# SELECT
-#  V_ProgramParticipation.name
-#  ,V_ProgramParticipation.personID
-#  ,V_ProgramParticipation.startDate
-#  ,V_ProgramParticipation.endDate
-#  ,Enrollment.Grade
-#  ,Enrollment.CampusSchoolName
-#  ,Enrollment.EnrollmentStartDate
-#  ,Enrollment.EnrollmentEndDate
-#  ,Enrollment.EndYear
-#  ,Enrollment.CalendarName
-#  ,Enrollment.EnrollmentType
-#  ,studentdemographic.frlstatus
-#  ,studentdemographic.calculatedlanguageproficiency
-#  ,studentdemographic.gt
-#  ,studentdemographic.ethnicity
-#  ,studentdemographic.genderdescription as Gender
-#  ,studentdemographic.iep
-#  ,studentdemographic.primarydisability
-#  ,studentdemographic.programtype AS ELLProgram
-# FROM 
-#   Jeffco_IC.dbo.V_ProgramParticipation (NOLOCK)
-# JOIN AchievementDW.dim.Enrollment (NOLOCK) ON 
-#   Enrollment.PersonID = V_ProgramParticipation.PersonID
-# LEFT JOIN AchievementDW.dim.StudentDemographic WITH (NOLOCK) ON 
-#   V_ProgramParticipation.PersonID = StudentDemographic.PersonID
-# WHERE
-#  name = 'READ'
-# --AND
-# --V_ProgramParticipation.personID in (1523935,1522073, 1632653)
-# --AND
-#  -- StudentDemographic.PersonID = 2240583
-# AND
-#   StudentDemoGraphic.LatestRecord = 1
-# AND
-#   V_ProgramParticipation.active = 1
-# AND 
-#   Enrollment.DeletedInCampus = 0
-# AND 
-#   Enrollment.LatestRecord = 1
-# --AND 
-#  -- Enrollment.EnrollmentType = 'Primary'
-# --AND 
-#  -- endDate > '2024-01-01 00:00:00'
-# "
-# )
+qryFlags <- odbc::dbGetQuery(con,
+                                "
+SELECT
+ V_ProgramParticipation.name
+ ,V_ProgramParticipation.personID
+ ,V_ProgramParticipation.startDate
+ ,V_ProgramParticipation.endDate
+ ,Enrollment.Grade
+ ,Enrollment.CampusSchoolName
+ ,Enrollment.EnrollmentStartDate
+ ,Enrollment.EnrollmentEndDate
+ ,Enrollment.EndYear
+ ,Enrollment.CalendarName
+ ,Enrollment.EnrollmentType
+ ,studentdemographic.frlstatus
+ ,studentdemographic.calculatedlanguageproficiency
+ ,studentdemographic.gt
+ ,studentdemographic.ethnicity
+ ,studentdemographic.genderdescription as Gender
+ ,studentdemographic.iep
+ ,studentdemographic.primarydisability
+ ,studentdemographic.programtype AS ELLProgram
+FROM
+  Jeffco_IC.dbo.V_ProgramParticipation (NOLOCK)
+JOIN AchievementDW.dim.Enrollment (NOLOCK) ON
+  Enrollment.PersonID = V_ProgramParticipation.PersonID
+LEFT JOIN AchievementDW.dim.StudentDemographic WITH (NOLOCK) ON
+  V_ProgramParticipation.PersonID = StudentDemographic.PersonID
+WHERE
+ name = 'READ'
+--AND
+--V_ProgramParticipation.personID in (1523935,1522073, 1632653)
+--AND
+ -- StudentDemographic.PersonID = 2240583
+AND
+  StudentDemoGraphic.LatestRecord = 1
+AND
+  V_ProgramParticipation.active = 1
+AND
+  Enrollment.DeletedInCampus = 0
+AND
+  Enrollment.LatestRecord = 1
+--AND
+ -- Enrollment.EnrollmentType = 'Primary'
+--AND
+ -- endDate > '2024-01-01 00:00:00'
+"
+)
 
 # saveRDS(qryFlags, 'data/qryFlags.rds')
 
-qryFlags <- 
-  readRDS('data/qryFlags.rds')
+# qryFlags <- 
+#   readRDS('data/qryFlags.rds')
 
 #Load Demographics Look up Tables ----
 frlLookup <- data.frame(
@@ -157,7 +157,9 @@ flagStart <- qryFlags %>%
          planEndInterval = planEndDate %within% enrollmentInterval,
          planStart = ifelse(planStartInterval == TRUE, paste0(Grade, "- Start plan"), NA), #report if plan was started
          planEnd = ifelse(planEndInterval == TRUE, paste0(Grade, "- Exit plan"), NA)) %>% #report if plan was ended
-  select(personID, Grade, CampusSchoolName, CalendarName, EnrollmentStartDate, PlanStartDate, planStart, EnrollmentEndDate, planEndDate, planEnd, EndYear, EnrollmentType, frlstatus, calculatedlanguageproficiency, gt, ethnicity, iep, primarydisability, ELLProgram) %>%
+  select(personID, Grade, CampusSchoolName, CalendarName, EnrollmentStartDate, PlanStartDate, planStart, EnrollmentEndDate, 
+         planEndDate, planEnd, EndYear, EnrollmentType, frlstatus, calculatedlanguageproficiency, gt, 
+         ethnicity, iep, primarydisability, ELLProgram) %>%
   filter(EnrollmentEndDate < '2024-06-30' | is.na(EnrollmentEndDate)) %>% #exclude enrollments in the 2025 school year
   mutate(gradeInt = case_when(
     Grade == 'K' ~ 0, 
@@ -214,7 +216,10 @@ flagStart <- qryFlags %>%
   full_join(frlLookup) %>% 
   full_join(gtLookup) %>% 
   filter(!is.na(personID)) %>% 
-  select(-c(frlstatus, calculatedlanguageproficiency, gt, ethnicity, iep, primarydisability, ELLProgram) )
+  select(-c(frlstatus, calculatedlanguageproficiency, gt, ethnicity, iep, primarydisability, ELLProgram)) 
+  # arrange(personID, desc(EnrollmentEndDate), EnrollmentEndDatePlus) %>% 
+  # filter(personID == 2269294) 
+  # distinct(personID, Grade, planStart, .keep_all = T)
 
 ## Transform data into long format to add in summarizing ----
 flagLonger <- flagStart %>% 
@@ -726,6 +731,10 @@ grade3ExitedCMASAll <- readPlanGrade3 %>%
   group_by(cmasProfLevel) %>% 
   mutate(diff = lag(cmasPlanLength) - (cmasPlanLength)) 
 
+
+shortPlan <- grade3ExitedCMASAll %>% 
+  filter(studentPlanLength <7)
+
 ## Explore the DIBELS performance levels of students from cohort alongside their READ Plan info ----
 ### must recent DIBELS results ----
 #### Filter to English testing ----
@@ -990,7 +999,7 @@ gt(planLength) %>%
   t.test(categoryValue ~ planEnd, data = allEoyGroups)
   }
   
-  tTestGroups(.cat= 'remoteKinder') 
+  tTestGroups(.cat= 'childFind') 
   
   categoryValues <- c('raceBin', 'mlBin', 'iepBin', 'frlBin', 'gtBin','jsel', 'jeffcoPk', 'childFind', 'remoteKinder')
   
@@ -1034,6 +1043,80 @@ gt(planLength) %>%
     fmt_icon(columns = pFlag, 
              fill_color = list('check' = 'grey', 'x' = 'white')) %>% 
     tab_footnote(footnote =  md(glue::glue("{fontawesome::fa('check')} = Significant difference")))
+  
+## Proportion Testing ----
+  propTestGroups <- function(.cat) {
+    allEoyGroups <- flagStartFilledFlag %>% 
+      pivot_longer(cols = c(raceBin, mlBin, iepBin, frlBin, gtBin,jsel, jeffcoPk, childFind, remoteKinder), 
+                   names_to = 'category', 
+                   values_to = 'categoryValue') %>% 
+      ungroup() %>% 
+      mutate(planEnd = ifelse(planEnd== 'Exit plan', 1, 0)) %>% 
+      mutate(categoryValue = replace_na(categoryValue, 0)) %>% 
+      select(category, categoryValue, planEnd) %>% 
+      filter(category == .cat) %>% 
+      mutate(n = n()) %>% 
+      group_by(planEnd, categoryValue) %>% 
+      reframe(planEndN = n())
+    
+    xValues <- allEoyGroups %>% 
+      filter(planEnd == 1) %>% 
+      pull(planEndN)
+    
+    nValues <- allEoyGroups %>% 
+      filter(planEnd == 0) %>% 
+      pull(planEndN)
+
+    prop.test(x = xValues, 
+              n = nValues,
+              conf.level = 0.95)
+  }
+  
+  propTestGroups(.cat= 'childFind') 
+  
+  categoryValues <- c('raceBin', 'mlBin', 'iepBin', 
+                      'frlBin', 'gtBin','jsel', 
+                      'jeffcoPk', 'childFind', 'remoteKinder')
+  
+  propTtestResults <-   map(categoryValues, propTestGroups)
+  
+  pValues <- data.frame(category = categoryValues, 
+                        p = c(propTtestResults[[1]][["p.value"]], 
+                              propTtestResults[[2]][["p.value"]], 
+                              propTtestResults[[3]][["p.value"]],
+                              propTtestResults[[4]][["p.value"]],
+                              propTtestResults[[5]][["p.value"]],
+                              propTtestResults[[6]][["p.value"]],
+                              propTtestResults[[7]][["p.value"]], 
+                              propTtestResults[[8]][["p.value"]], 
+                              propTtestResults[[9]][["p.value"]])) %>% 
+    mutate(p = round(p, 4)) %>% 
+    mutate(pFlag = case_when(
+      p < 0.05 ~ 1, 
+      TRUE ~ 0
+    )) %>% 
+    mutate(category = factor(category, 
+                             levels = c( 'frlBin', 'iepBin', 'raceBin', 
+                                         'mlBin','jsel', 'jeffcoPk', 
+                                         'childFind', 'remoteKinder', 'gtBin'), 
+                             labels = c( 'FRL', 'IEP', 'Students of Color', 
+                                         'ML Program','JSEL', 'Jeffco PK', 
+                                         'ChildFind', 'Remote Kinder', 'GT'))) %>% 
+    arrange(category) %>% 
+    mutate(
+      pFlag = ifelse(pFlag == 1, "check", "x")
+    )
+  
+  gt(pValues) %>% 
+    cols_label(category = 'Student Group', 
+               p = 'p-value',
+               pFlag  = ' ') %>% 
+    tab_header(title = 'Pvalues of students who exited READ Plan by the end of grade 3') %>% 
+    cols_align(align = 'left', columns = category) %>% 
+    fmt_icon(columns = pFlag, 
+             fill_color = list('check' = 'grey', 'x' = 'white')) %>% 
+    tab_footnote(footnote =  md(glue::glue("{fontawesome::fa('check')} = Significant difference")))
+  
 
 # What time of the year of plans tend to start?----  
   planStartTime <- flagStart %>% 
@@ -1305,7 +1388,7 @@ planEndSampled <- planEndSample %>%
     
     sort(unique(odbcListDrivers()[[1]])) 
     
-    qryStudentRoster <- dbGetQuery(con, "
+qryStudentRoster <- dbGetQuery(con, "
 SELECT DISTINCT	
 Course.homeroom
 ,Course.courseID
@@ -1313,34 +1396,42 @@ Course.homeroom
 ,Section.sectionID
 ,Section.number
 ,Section.teacherDisplay
-,TeacherSection.TeacherName
-,Section.homeroomSection
 ,SectionStudent.SchoolName
-,Roster.personID
+,Roster.PersonID
 ,StudentDemographic.LegalFirstName
 ,StudentDemographic.LegalLastName
-,Enrollment.EnrollmentEndDate
+--,Enrollment.EnrollmentEndDate
 ,Enrollment.EndYear
 ,Enrollment.Grade
+,Roster.ModifiedDate
+,Roster.StartDate
+,Roster.EndDate
 FROM Jeffco_IC.dbo.Course WITH (NOLOCK)
 LEFT JOIN jeffco_IC.dbo.Section (nolock) ON 
   Course.courseID = Section.courseID
 LEFT JOIN jeffco_IC.dbo.Roster (nolock) ON 
   Section.sectionID = Roster.SectionID
 LEFT JOIN AchievementDW.dim.StudentDemographic (nolock) ON 
-Roster.personID = StudentDemographic.PersonID 
+  Roster.personID = StudentDemographic.PersonID 
 LEFT JOIN AchievementDW.dim.SectionStudent (NOLOCK) ON 
   Roster.personID = SectionStudent.personID 
-LEFT JOIN AchievementDW.dim.Enrollment WITH (NOLOCK) ON 
+RIGHT JOIN AchievementDW.dim.Enrollment WITH (NOLOCK) ON 
   SectionStudent.EnrollmentID = Enrollment.EnrollmentID AND 
   SectionStudent.PersonID = Enrollment.PersonID
 LEFT JOIN AchievementDW.Dim.TeacherSection WITH (NOLOCK) ON 
   Roster.sectionID = TeacherSection.SectionID
-WHERE COURSE.homeroom = 'TRUE'
-AND course.active = 'TRUE'
-AND Section.homeroomSection = 'TRUE'
-AND	SectionStudent.IsInvalid = 0
-AND StudentDemographic.IsInvalid = 0
+WHERE
+-- Roster.PersonID = 2240583 -- student will not show end year teacher
+--AND 
+  StudentDemographic.IsInvalid = 0
+AND
+  StudentDemographic.LatestRecord = 1
+AND 
+  course.active = 'TRUE'
+AND	
+  SectionStudent.IsInvalid = 0
+AND 
+  StudentDemographic.IsInvalid = 0
 AND
   StudentDemographic.LatestRecord = 1
 AND
@@ -1348,16 +1439,9 @@ AND
 AND
   Enrollment.EndYear = 2024
 AND 
+  Roster.EndDate IS NULL
+AND 
   Enrollment.Grade = '3'
---AND
- -- Roster.PersonID = 2240583 -- student will not show end year teacher
-AND
-  TeacherSection.PrimaryTeacherFlag = 1
-AND	Enrollment.LatestRecord = 1
-AND	StudentDemographic.LatestRecord = 1
-AND Enrollment.EnrollmentType = 'Primary'
---AND
---Enrollment.EndStatus = ''
 "
 )
 
@@ -1369,24 +1453,24 @@ studentExitGrade3 <- flagStart %>%
     select(-status) %>% 
     filter(value == '3- Exit plan') 
     
-  teacherStudentLink <- qryStudentRoster %>% 
-    right_join(studentExitGrade3, join_by(personID, Grade)) %>% 
-    arrange(personID, desc(EnrollmentEndDate)) %>% 
-    distinct(personID, .keep_all = T) %>%
+teacherStudentLink <- qryStudentRoster %>% 
+    right_join(studentExitGrade3, join_by(PersonID == personID)) %>% 
+    filter(homeroom == TRUE) %>% 
+    distinct(PersonID, .keep_all = T) %>%
     # group_by(personID) %>% 
     # mutate(n = n()) %>% 
     # filter(n >1)
-    filter(is.na(courseID)) %>% 
-    select(teacher = teacherDisplay, school = SchoolName, personID, firstName = LegalFirstName, lastName = LegalLastName)
+    filter(!is.na(courseID)) %>% 
+    select(teacher = teacherDisplay, school = SchoolName, PersonID, firstName = LegalFirstName, lastName = LegalLastName)
   
-  teacherSummary <- teacherStudentLink %>% 
+teacherSummary <- teacherStudentLink %>% 
     group_by(teacher) %>% 
     reframe(n =n(), 
             school = first(school)) %>% 
     arrange(desc(n)) %>% 
     head(15)
   
-  schoolSummary <- teacherStudentLink %>% 
+schoolSummary <- teacherStudentLink %>% 
     group_by(school) %>% 
     reframe(n =n()) %>% 
     arrange(desc(n)) %>% 
@@ -1535,9 +1619,9 @@ AND
   #### Plot summary of CMAS performance for exited students ----
   grade3NoPlanCMAS <- neverOnPlan %>% 
     ungroup() %>% 
-    left_join(cmasPerformance, join_by(personID == personId)) %>% 
+    # left_join(cmasPerformance, join_by(personId)) %>% 
     filter(!is.na(cmasProfLevel)) %>% 
-    distinct(personID, cmasProfLevel, .keep_all = T) %>% 
+    distinct(personId, cmasProfLevel, .keep_all = T) %>% 
     mutate(totalN = n()) %>% 
     group_by(cmasProfLevel) %>% 
     reframe(groupN = n(), 
@@ -1582,13 +1666,14 @@ AND
   #### Explore students never on READ Plan with Low CMAS Performance -----
   grade3NoPlanCMASLo <- neverOnPlan %>% 
     ungroup() %>% 
-    left_join(cmasPerformance, join_by(personID == personId)) %>% 
-    filter(cmasProfLevel == 'Did Not Yet Meet Expectations') %>% 
-    pull(personID)
+    # left_join(cmasPerformance, join_by(personID == personId)) %>% 
+    filter(cmasProfLevel == 'Did Not Yet Meet Expectations') %>%
+    pull(personId)
   
   
   loCmasDibels <- dibelsCombined %>% 
     filter(personId %in% grade3NoPlanCMASLo, 
-           readstatus != 'READ Plan') %>% 
+           readstatus == 'READ Plan') %>% 
     filter(proficiencyLongDescription == 'Well Below Benchmark')
+  
   
