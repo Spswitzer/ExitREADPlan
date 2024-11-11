@@ -99,22 +99,22 @@ flagSummaryWaterfallStart <- flagSummaryWaterfall %>%
                             "Plan Start: 3 Plan End: 3",
                             "Plan Start: 3 Plan End: No End"),
                           labels = c(
-                            "Plan Start: K",
+                            "Plan Start",
                             "K\nEnd: K", 
                             "K\nEnd: 1", 
                             "K\nEnd: 2", 
                             "K\nEnd: 3",  
                             "K\nNo End",
-                            "Plan Start: 1",
+                            "Plan Start ",
                             "1\nEnd: 1", 
                             "1\nEnd: 2", 
                             "1\nEnd: 3" , 
                             "1\nNo End", 
-                            "Plan Start: 2",
+                            "Plan Start   ",
                             "2\nEnd: 2", 
                             "2\nEnd: 3", 
                             "2\nNo End", 
-                            "Plan Start: 3",
+                            "Plan Start  ",
                             "3\nEnd: 3",
                             "3\nNo End"),
                           ordered = T)) %>%
@@ -122,9 +122,131 @@ flagSummaryWaterfallStart <- flagSummaryWaterfall %>%
 
 waterfall(flagSummaryWaterfallStart, 
           calc_total = F) +
-  labs(title = 'Summary of Read Plan Status for Cohort', 
+  labs(title = 'Summary of Read Plan Status for 2024 Cohort', 
        x = '', 
        y = '') +
   theme_classic()+
   theme(axis.text.y = element_blank(), 
+        axis.text.x = element_text(size = 10, 
+                                   face = 'bold'),
         axis.ticks = element_blank())
+
+
+# Organize by time of exit and start ----
+## Summary table ----
+flagSummaryWaterfallTime <- flagStart %>% 
+  select(personID, planStart, planEnd) %>% 
+  mutate(planStart = str_remove(planStart, '- Start plan'), 
+         planEnd = str_remove(planEnd, '- Exit plan')) %>% 
+  pivot_longer(c(planStart, planEnd), 
+               names_to = 'status') %>% 
+  filter(!is.na(value)) %>% 
+  pivot_wider(names_from = status, 
+              values_from = value) %>% 
+  ungroup() %>% 
+  mutate(totalN = n()) %>% 
+  group_by(planStart) %>% 
+  mutate(planStartN = n_distinct(personID)) %>% 
+  group_by(planStart, planEnd) %>% 
+  mutate(planEndN = n_distinct(personID)) %>% 
+  group_by(planStart, planEnd) %>% 
+  summarise(startEndN = n(), 
+            planStartN = first(planStartN), 
+            planEndN = first(planEndN), 
+            totalN = first(totalN)) %>% 
+  mutate(startEndN = -startEndN) %>% 
+  mutate(planEnd = replace_na(planEnd, 'No End')) %>% 
+  group_by(planStart, planStartN) %>% 
+  arrange(planEnd) %>% 
+  mutate(startEndN = case_when(
+    planEnd == 'No End' ~ 0, 
+    TRUE ~ startEndN
+  )) %>% 
+  mutate(planStartNum = case_when(
+    planStart == 'K' ~ 0,
+    TRUE ~ as.numeric(planStart)
+  )) %>% 
+  mutate(planEndNum = case_when(
+    planEnd == 'K' ~ 0,
+    planEnd == 'No End' ~ -1,
+    TRUE ~ as.numeric(planEnd)
+  )) %>% 
+  arrange(planStartNum, planEndNum) %>% 
+  mutate(planStudentsDiff = planStartN + startEndN)
+
+flagSummaryWaterfallStartTime <- flagSummaryWaterfallTime %>% 
+  mutate(planStart = paste0('Plan Start: ', planStart), 
+         planEnd = paste0('Plan End: ', planEnd)) %>% 
+  mutate(planEnd = case_when(
+    planEnd == 'Plan End: K' ~ paste0(planStart, ' ', planEnd), 
+    planEnd == 'Plan End: 1' ~ paste0(planStart, ' ', planEnd), 
+    planEnd == 'Plan End: 2' ~ paste0(planStart, ' ', planEnd), 
+    planEnd == 'Plan End: 3' ~ paste0(planStart, ' ', planEnd), 
+    TRUE ~ paste0(planStart,  ' ', planEnd)
+  )) %>% 
+  pivot_longer(cols = c(planStart, planEnd), 
+               names_to = 'planStatus', 
+               values_to = 'planStatusValue') %>% 
+  filter(planStatus == 'planEnd') %>% 
+  distinct(planStatusValue, .keep_all = T) %>% 
+  select(planStatusValue, startEndN, planStudentsDiff) %>% 
+  pivot_longer(cols = c(startEndN), 
+               names_to = 'EndN', 
+               values_to = 'N') %>% 
+  ungroup() %>% 
+  # select(planStatusValue, N, planStudentsDiff) %>% 
+  # distinct(planStatusValue, N, planStudentsDiff) %>% 
+  mutate(N = case_when(
+    planStatusValue %in% c("Plan Start: K Plan End: No End", 
+                           "Plan Start: 1 Plan End: No End", 
+                           "Plan Start: 2 Plan End: No End", 
+                           "Plan Start: 3 Plan End: No End"
+    ) ~ abs(N), 
+    TRUE ~ N
+  )) %>% 
+  pivot_longer(c(N, planStudentsDiff)) %>% 
+  unite('planStatusValues', planStatusValue:name, sep = '_' )
+  # mutate(planStatusValue = factor(planStatusValue,
+  #                                 levels = c(
+  #                                   "Plan Start: K",
+  #                                   "Plan Start: K Plan End: K", 
+  #                                   "Plan Start: K Plan End: 1", 
+  #                                   "Plan Start: K Plan End: 2", 
+  #                                   "Plan Start: K Plan End: 3",  
+  #                                   "Plan Start: K Plan End: No End",
+  #                                   "Plan Start: 1",
+  #                                   "Plan Start: 1 Plan End: 1", 
+  #                                   "Plan Start: 1 Plan End: 2", 
+  #                                   "Plan Start: 1 Plan End: 3" , 
+  #                                   "Plan Start: 1 Plan End: No End", 
+  #                                   "Plan Start: 2",
+  #                                   "Plan Start: 2 Plan End: 2", 
+  #                                   "Plan Start: 2 Plan End: 3", 
+  #                                   "Plan Start: 2 Plan End: No End", 
+  #                                   "Plan Start: 3",
+  #                                   "Plan Start: 3 Plan End: 3",
+  #                                   "Plan Start: 3 Plan End: No End"),
+  #                                 labels = c(
+  #                                   "Plan Start",
+  #                                   "K\nEnd: K", 
+  #                                   "K\nEnd: 1", 
+  #                                   "K\nEnd: 2", 
+  #                                   "K\nEnd: 3",  
+  #                                   "K\nNo End",
+  #                                   "Plan Start ",
+  #                                   "1\nEnd: 1", 
+  #                                   "1\nEnd: 2", 
+  #                                   "1\nEnd: 3" , 
+  #                                   "1\nNo End", 
+  #                                   "Plan Start   ",
+  #                                   "2\nEnd: 2", 
+  #                                   "2\nEnd: 3", 
+  #                                   "2\nNo End", 
+  #                                   "Plan Start  ",
+  #                                   "3\nEnd: 3",
+  #                                   "3\nNo End"),
+  #                                 ordered = T)) %>%
+  # arrange(planStatusValue) 
+
+
+waterfall(flagSummaryWaterfallStartTime)
