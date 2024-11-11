@@ -1117,6 +1117,73 @@ gt(planLength) %>%
              fill_color = list('check' = 'grey', 'x' = 'white')) %>% 
     tab_footnote(footnote =  md(glue::glue("{fontawesome::fa('check')} = Significant difference")))
   
+  # Run Effect Size testing ----
+  library(rstatix)
+  library(effsize)
+  
+  effectSizeGroups <- function(.cat) {
+    allEoyGroups <- flagStartFilledFlag %>% 
+      pivot_longer(cols = c(raceBin, mlBin, iepBin, frlBin, gtBin,jsel, jeffcoPk, childFind, remoteKinder), 
+                   names_to = 'category', 
+                   values_to = 'categoryValue') %>% 
+      ungroup() %>% 
+      mutate(planEnd = str_remove(planEnd, "^.{0,3}")) %>% 
+      mutate(planEnd = ifelse(planEnd == 'Exit plan', 1, 0)) %>% 
+      mutate(categoryValue = replace_na(categoryValue, 0), 
+             planEnd = replace_na(planEnd, 0)) %>% 
+      select(category, categoryValue, planEnd) %>% 
+      filter(category == .cat) %>% 
+      arrange(planEnd)
+    
+    categoryValue <- allEoyGroups$categoryValue
+    planEnd <- allEoyGroups$planEnd
+    
+    cohen.d(categoryValue,  planEnd)
+  }
+  
+  
+  effectSizeGroups(.cat= 'childFind') 
+  
+  categoryValues <- c('raceBin', 'mlBin', 'iepBin', 
+                      'frlBin', 'gtBin','jsel', 
+                      'jeffcoPk', 'childFind', 'remoteKinder')
+  
+  effectSizeResults <-   map(categoryValues, effectSizeGroups)
+  
+  
+  effectSize <- data.frame(category = categoryValues, 
+                        d = c(effectSizeResults[[1]][["estimate"]], 
+                              effectSizeResults[[2]][["estimate"]], 
+                              effectSizeResults[[3]][["estimate"]],
+                              effectSizeResults[[4]][["estimate"]],
+                              effectSizeResults[[5]][["estimate"]],
+                              effectSizeResults[[6]][["estimate"]],
+                              effectSizeResults[[7]][["estimate"]], 
+                              effectSizeResults[[8]][["estimate"]], 
+                              effectSizeResults[[9]][["estimate"]])) %>% 
+    mutate(d = round(d, 2)) %>% 
+    # mutate(pFlag = case_when(
+    #   d < 0.05 ~ 1, 
+    #   TRUE ~ 0
+    # )) %>% 
+    mutate(category = factor(category, 
+                             levels = c( 'frlBin', 'iepBin', 'raceBin', 
+                                         'mlBin','jsel', 'jeffcoPk', 
+                                         'childFind', 'remoteKinder', 'gtBin'), 
+                             labels = c( 'FRL', 'IEP', 'Students of Color', 
+                                         'ML Program','JSEL', 'Jeffco PK', 
+                                         'ChildFind', 'Remote Kinder', 'GT'))) %>% 
+    arrange(category) 
+  # >% 
+  #   mutate(
+  #     pFlag = ifelse(pFlag == 1, "check", "x")
+  #   )
+  
+  gt(effectSize) %>% 
+    cols_label(category = 'Student Group', 
+               d = 'effect size') %>% 
+    tab_header(title = "Cohen's D value of students who exited READ Plan by the end of grade 3") %>% 
+    cols_align(align = 'left', columns = category) 
 
 # What time of the year of plans tend to start?----  
   planStartTime <- flagStart %>% 
@@ -1339,6 +1406,7 @@ gt(planLength) %>%
                  names_to = 'category', 
                  values_to = 'categoryValue') %>% 
     select(personID, planEnd, category, categoryValue) %>% 
+    filter(category %in% c('iepBin', 'jsel', 'jeffcoPk', 'gtBin')) %>% 
     ungroup() %>% 
     mutate(n = n_distinct(personID)) %>% 
     group_by(category, categoryValue) %>% 
@@ -1359,20 +1427,24 @@ gt(planLength) %>%
              categoryPct = categoryN/planN)
     
     planEndSample <- groupSummary %>% 
-      filter(planEnd %in% c( '3- Exit plan', '2- Exit plan', '1- Exit plan')) %>% 
+      filter(!planEnd %in% c( '3- Exit plan', '2- Exit plan', '1- Exit plan')) %>% 
       mutate(personID = as.character(personID)) %>% 
       group_by(category) %>% 
-      slice_sample(n = 50, 
+      slice_sample(prop = .08, 
                    replace= T)
     
-sample <- sample(x = planEndSample$personID, 
-           prob = planEndSample$categoryPct , #a vector of probability weights for obtaining the elements of the vector being sampled.
-           replace = F, #If replace is false, these probabilities are applied sequentially, that is the probability of choosing the next item is proportional to the weights among the remaining items
-           size = (nrow(planEndSample)/9) * .33) # nine categories
+    
+    NoExitPlans <- planEndSample %>% 
+      distinct(personID) 
+    
+# sample <- sample(x = planEndSample$personID, 
+#            prob = planEndSample$categoryPct , #a vector of probability weights for obtaining the elements of the vector being sampled.
+#            replace = F, #If replace is false, these probabilities are applied sequentially, that is the probability of choosing the next item is proportional to the weights among the remaining items
+#            size = (nrow(planEndSample)/9) * .33) # nine categories
 
-planEndSampled <- planEndSample %>% 
-  filter(personID %in% sample, 
-         category == 'raceBin')
+# planEndSampled <- planEndSample %>% 
+#   filter(personID %in% sample, 
+#          category == 'raceBin')
 
 # Attach Student to Teacher ----
     library(DBI)
