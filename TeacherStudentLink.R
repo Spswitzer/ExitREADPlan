@@ -65,8 +65,8 @@ AND
   Enrollment.EndYear = 2024
 AND 
   Enrollment.Grade = '3'
---AND
- -- Roster.PersonID = 2240583 -- student will not show end year teacher
+AND
+ Roster.PersonID = 2240583 -- student will not show end year teacher
 AND
   TeacherSection.PrimaryTeacherFlag = 1
 AND	Enrollment.LatestRecord = 1
@@ -74,5 +74,63 @@ AND	StudentDemographic.LatestRecord = 1
 AND Enrollment.EnrollmentType = 'Primary'
 --AND
 --Enrollment.EndStatus = ''
+"
+)
+
+
+
+qryStudentRoster2 <- dbGetQuery(con, "
+SELECT DISTINCT	
+Course.homeroom
+,Course.courseID
+,Course.name
+,Section.sectionID
+,Section.number
+,Section.teacherDisplay
+,Roster.PersonID
+,StudentDemographic.LegalFirstName
+,StudentDemographic.LegalLastName
+--,Enrollment.EnrollmentEndDate
+,Enrollment.EndYear
+,Enrollment.Grade
+,Roster.ModifiedDate
+,Roster.StartDate
+,Roster.EndDate
+FROM Jeffco_IC.dbo.Course WITH (NOLOCK)
+LEFT JOIN jeffco_IC.dbo.Section (nolock) ON 
+  Course.courseID = Section.courseID
+LEFT JOIN jeffco_IC.dbo.Roster (nolock) ON 
+  Section.sectionID = Roster.SectionID
+LEFT JOIN AchievementDW.dim.StudentDemographic (nolock) ON 
+  Roster.personID = StudentDemographic.PersonID 
+LEFT JOIN AchievementDW.dim.SectionStudent (NOLOCK) ON 
+  Roster.personID = SectionStudent.personID 
+RIGHT JOIN AchievementDW.dim.Enrollment WITH (NOLOCK) ON 
+  SectionStudent.EnrollmentID = Enrollment.EnrollmentID AND 
+  SectionStudent.PersonID = Enrollment.PersonID
+LEFT JOIN AchievementDW.Dim.TeacherSection WITH (NOLOCK) ON 
+  Roster.sectionID = TeacherSection.SectionID
+WHERE
+-- Roster.PersonID = 1765183 -- student will not show end year teacher
+--AND 
+  StudentDemographic.IsInvalid = 0
+AND
+  StudentDemographic.LatestRecord = 1
+AND 
+  course.active = 'TRUE'
+AND	
+  SectionStudent.IsInvalid = 0
+AND 
+  StudentDemographic.IsInvalid = 0
+AND
+  StudentDemographic.LatestRecord = 1
+AND
+  Course.name = 'Homeroom 3'
+AND
+  Enrollment.EndYear = 2024
+AND 
+  Roster.EndDate IS NULL
+AND 
+  Enrollment.Grade = '3'
 "
 )
