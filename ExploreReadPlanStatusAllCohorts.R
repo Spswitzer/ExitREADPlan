@@ -489,6 +489,42 @@ flagSummary <- flagStart %>%
                           ordered = T)) %>% 
   arrange(planEnd)
 
+## Summary for Line Plot ----
+flagSummaryPlot <- flagStart %>% 
+  select(personID, planStart, planEnd) %>% 
+  mutate(planStart = str_remove(planStart, '- Start plan'), 
+         planEnd = str_remove(planEnd, '- Exit plan')) %>% 
+  pivot_longer(c(planStart, planEnd), 
+               names_to = 'status') %>% 
+  filter(!is.na(value)) %>% 
+  pivot_wider(names_from = status, 
+              values_from = value) %>% 
+  ungroup() %>% 
+  mutate(totalN = n()) %>% 
+  group_by(planStart) %>% 
+  mutate(planStartN = n_distinct(personID)) %>% 
+  group_by(planEnd) %>% 
+  mutate(planEndN = n_distinct(personID)) %>% 
+  group_by(planStart, planEnd) %>% 
+  summarise(startEndN = n(), 
+            planStartN = first(planStartN), 
+            planEndN = first(planEndN), 
+            planEndPct = startEndN/planStartN, 
+            totalN = first(totalN)) %>% 
+  mutate(planEnd = replace_na(planEnd, 'No End')) %>% 
+  filter(!is.na(planStart)) %>%
+  mutate(planStart = factor(planStart, 
+                            levels = c('K', '1', '2', '3'), 
+                            labels = c('Kindergarten', '1st', '2nd', '3rd'), 
+                            ordered = T)) %>% 
+  # mutate(planStartN = paste0(planStartN, ' Students started plan')) %>% 
+  group_by(planStart, planStartN) %>% 
+  mutate(planEnd = factor(planEnd, 
+                          levels = c('K', '1', '2', '3', 'No End'),
+                          labels = c('Kinder', '1st', '2nd', '3rd', 'No End'),
+                          ordered = T)) %>% 
+  arrange(planEnd)
+
   ## Create summary GT table ----
 summarytable <- gt(flagSummary) %>% 
   cols_label(planEnd = 'Grade when Plan Ended', 
@@ -1207,6 +1243,7 @@ return(list(flagStart = flagStart,
             flagLonger = flagLonger, 
             flagSummary = flagSummary, 
             summarytable = summarytable, 
+            flagSummaryPlot = flagSummaryPlot,
             cohortSummary = cohortSummary, 
             cohortSummaryTable = cohortSummaryTable, 
             flagWider = flagWider, 
@@ -1244,5 +1281,157 @@ cohort23 <- flagStartFunction(.date = '2023-06-30', .endYear = 2023, .cmasYear =
 cohort22 <- flagStartFunction(.date = '2022-06-30', .endYear = 2022, .cmasYear = 'CMAS ELA Grade 03 2021-22')
 cohort21 <- flagStartFunction(.date = '2021-06-30', .endYear = 2021, .cmasYear = 'CMAS ELA Grade 03 2020-21')
 
-data <- cohort21$planEndTimeSeasontable
+data24 <- cohort24$flagSummaryPlot %>% 
+  distinct(planStart, planStartN, totalN) %>% 
+  mutate(endYear = '2023-2024')
 
+data23 <-   bind_rows(cohort23$flagSummaryPlot) %>% 
+  distinct(planStart, planStartN, totalN) %>% 
+  mutate(endYear = '2022-2023')
+  
+data22 <-   bind_rows(cohort22$flagSummaryPlot) %>% 
+  distinct(planStart, planStartN, totalN) %>% 
+  mutate(endYear = '2021-2022')
+  
+data21 <-   bind_rows(cohort21$flagSummaryPlot) %>% 
+  distinct(planStart, planStartN, totalN) %>% 
+  mutate(endYear = '2020-2021')
+
+allYears <- data24 %>% 
+  bind_rows(data23) %>% 
+  bind_rows(data22) %>% 
+  bind_rows(data21) %>% 
+  mutate(planStart = factor(planStart, 
+                            levels = c('Kindergarten', '1st', 
+                                       '2nd', '3rd'), 
+                            labels = c('Kindergarten', '1st Grade', 
+                                       '2nd Grade', '3rd Grade'),
+                            ordered = T
+  ))
+
+axisLabel <- allYears %>% 
+  filter(planStart == 'Kindergarten') %>% 
+  arrange(endYear) %>% 
+  head(4, endYear)
+
+ggplot(data = allYears, 
+       mapping = aes(x = endYear, 
+                     y = planStartN,
+                     group = planStart,
+                     color = planStart)) +
+  geom_line(show.legend = F) +
+  geom_point(size = 5) +
+  geom_label(aes(label = paste0(planStartN)), 
+             show.legend = F, 
+             size = 4, 
+             hjust = 1.25
+            ) +
+  scale_color_manual(values = c('#971b72', '#317bb4', '#1b8367', '#c1571a'))+
+  labs(title = 'Number of students starting READ Plan')+
+  theme_minimal() %>% 
+  theme(axis.title = element_blank(), 
+        axis.text.y = element_blank(), 
+        axis.text.x = element_text(size = 14), 
+        axis.ticks = element_blank(),
+        panel.grid = element_blank(), 
+        legend.position = 'top', 
+        legend.text = element_text(size = 14),
+        legend.title = element_blank()
+)
+
+
+ggplot(data = allYears, 
+       mapping = aes(x = planStart, 
+                     y = planStartN,
+                     group = endYear,
+                     color = endYear)) +
+  geom_line(show.legend = F) +
+  geom_point(size = 5) +
+  geom_label(aes(label = paste0(planStartN)), 
+             show.legend = F, 
+             size = 4, 
+             hjust = 1.25
+  ) +
+  scale_color_manual(values = c('#971b72', '#317bb4', '#1b8367', '#c1571a'))+
+  labs(title = 'Number of students starting READ Plan')+
+  theme_minimal() %>% 
+  theme(axis.title = element_blank(), 
+        axis.text.y = element_blank(), 
+        axis.text.x = element_text(size = 14), 
+        axis.ticks = element_blank(),
+        panel.grid = element_blank(), 
+        legend.position = 'top', 
+        legend.text = element_text(size = 14),
+        legend.title = element_blank()
+  )
+
+
+#Plan End Plot ----
+
+data24End <- cohort24$flagSummary %>% 
+  ungroup() %>% 
+  distinct(planEnd, planEndN, totalN) %>% 
+  mutate(endYear = '2023-2024')
+
+data23End <-   bind_rows(cohort23$flagSummary) %>% 
+  ungroup() %>%
+  distinct(planEnd, planEndN, totalN) %>% 
+  mutate(endYear = '2022-2023')
+
+data22End <-   bind_rows(cohort22$flagSummary) %>% 
+  ungroup() %>%
+  distinct(planEnd, planEndN, totalN) %>% 
+  mutate(endYear = '2021-2022')
+
+data21End <-   bind_rows(cohort21$flagSummary) %>% 
+  ungroup() %>%
+  distinct(planEnd, planEndN, totalN) %>% 
+  mutate(endYear = '2020-2021')
+
+allYearsEnd <- data24End %>% 
+  bind_rows(data23End) %>% 
+  bind_rows(data22End) %>% 
+  bind_rows(data21End) %>% 
+  mutate(planEnd = factor(planEnd, 
+                            levels = c('Kinder', '1st', 
+                                       '2nd', '3rd', 'No End' ), 
+                            labels = c('Kindergarten', '1st Grade', 
+                                       '2nd Grade', '3rd Grade', 'No Plan End'),
+                            ordered = T
+  ))
+
+ggplot(data = filter(allYearsEnd, planEnd != 'No Plan End'),
+       mapping = aes(x = endYear, 
+                     y = planEndN, 
+                     group = planEnd, 
+                     color = planEnd))+
+  geom_line() +
+  geom_point() +
+  ylim(0, 300) +
+  geom_label(aes(label = planEndN), 
+             show.legend = F) +
+  geom_line(data = filter(allYearsEnd, planEnd == 'No Plan End'),
+             mapping = aes(x = endYear, 
+                           y = 250)) +
+  geom_point(data = filter(allYearsEnd, planEnd == 'No Plan End'),
+             mapping = aes(x = endYear, 
+                           y = 250)) +
+  geom_label(data = filter(allYearsEnd, planEnd == 'No Plan End'),
+             mapping = aes(x = endYear, 
+                           y = 250, 
+                           label = planEndN), 
+             show.legend = F)+
+  labs(title = 'Number of students ending READ Plan') +
+  scale_color_manual(values = c('#971b72', '#317bb4', '#1b8367', '#c1571a', '#fbb040')) +
+  theme_minimal() %>% 
+  theme(axis.title = element_blank(), 
+        axis.text.y = element_blank(), 
+        axis.text.x = element_text(size = 14), 
+        axis.ticks = element_blank(),
+        panel.grid = element_blank(), 
+        legend.position = 'top', 
+        legend.text = element_text(size = 14),
+        legend.title = element_blank()
+  )
+
+            
