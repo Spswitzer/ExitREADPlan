@@ -733,7 +733,7 @@ grade3ExitedCMASAll <- readPlanGrade3 %>%
 
 
 shortPlan <- grade3ExitedCMASAll %>% 
-  filter(studentPlanLength <7)
+  filter(studentPlanLength < 2)
 
 ## Explore the DIBELS performance levels of students from cohort alongside their READ Plan info ----
 ### must recent DIBELS results ----
@@ -904,6 +904,33 @@ gt(planLength) %>%
   tab_options(
     table.font.size = 12
   ) 
+
+## Summary Plot -----
+planLengthPlot <- flagStartFilledFlag %>% 
+  mutate(across(c(jsel, jeffcoPk, childFind, remoteKinder), as.character)) %>% 
+  pivot_longer(cols = c(raceLabels, mlLabels, iepLabels, frlLabels, gtLabels, jsel, jeffcoPk, childFind, remoteKinder), 
+               names_to = 'category', 
+               values_to = 'categoryValue') %>% 
+  mutate(categoryValue = replace_na(categoryValue, '0')) %>% 
+  group_by(category, categoryValue, planEnd) %>%
+  filter(!is.na(planStart)) %>%
+  # mutate(planEnd = str_remove(planEnd, "^.{0,3}")) %>% 
+  # mutate(planEnd = replace_na(planEnd, "No exit by end of grade 3")) %>% 
+  group_by(personID) %>% 
+  mutate(planEndDate = replace_na(planEndDate, as.Date("2024-05-24"))) %>% 
+  mutate(studentPlanLength = interval(PlanStartDate, planEndDate) %/% months(1)) %>% 
+  ungroup() %>% 
+  distinct(personID, Grade, CampusSchoolName, studentPlanLength)
+
+ggplot(data = planLengthPlot, 
+       mapping = aes(x = studentPlanLength, 
+                    group = studentPlanLength)) +
+  geom_histogram(bins = 60) +
+  geom_text(aes(y = 0, 
+                label = studentPlanLength), 
+            color = 'purple')
+  
+
   
 # Summarize student groups by exit status ----
   allEoyGroupSummary <- flagStartFilledFlag %>% 
@@ -1118,7 +1145,6 @@ gt(planLength) %>%
     tab_footnote(footnote =  md(glue::glue("{fontawesome::fa('check')} = Significant difference")))
   
   # Run Effect Size testing ----
-  library(rstatix)
   library(effsize)
   
   effectSizeGroups <- function(.cat) {
@@ -1451,7 +1477,7 @@ gt(planLength) %>%
     library(odbc)
     library(janitor)
     library(tidyverse)
-    # Create connection to databases ----
+
     con <- odbc::dbConnect(odbc(),  
                            Driver = "SQL Server",  
                            Server = "qdc-soars-test",  
@@ -1459,7 +1485,7 @@ gt(planLength) %>%
                            Port = 1433)  
     
     sort(unique(odbcListDrivers()[[1]])) 
-    
+## Query roster of students and teachers ----
 qryStudentRoster <- dbGetQuery(con, "
 SELECT DISTINCT	
 Course.homeroom
@@ -1518,35 +1544,49 @@ AND
 )
 
 studentExitGrade3 <- flagStart %>% 
-    select(personID, Grade, planStart, planEnd) %>% 
-    pivot_longer(c(planStart, planEnd), 
-                  names_to = 'status') %>% 
-    filter(!is.na(value)) %>% 
-    select(-status) %>% 
-    filter(value == '3- Exit plan') 
+    # select(personID, Grade, planStart, planEnd) %>% 
+    # pivot_longer(c(planStart, planEnd), 
+    #               names_to = 'status') %>% 
+   filter(Grade == '3' & EndYear == 2024) %>% 
+  select(personID, CampusSchoolName, PlanStartDate, planEndDate) %>% 
+  mutate(planEnd = if_else(is.na(planEndDate), 0, 1), 
+         planStart = if_else(!is.na(PlanStartDate), 1, 0)) %>% 
+  select(personID, planStart, planEnd)
+
     
 teacherStudentLink <- qryStudentRoster %>% 
-    right_join(studentExitGrade3, join_by(PersonID == personID)) %>% 
+    right_join(studentExitGrade3, 
+               join_by(PersonID == personID), 
+               relationship = "many-to-many") %>% 
     filter(homeroom == TRUE) %>% 
     distinct(PersonID, .keep_all = T) %>%
-    # group_by(personID) %>% 
-    # mutate(n = n()) %>% 
-    # filter(n >1)
     filter(!is.na(courseID)) %>% 
-    select(teacher = teacherDisplay, school = SchoolName, PersonID, firstName = LegalFirstName, lastName = LegalLastName)
-  
+    select(teacher = teacherDisplay, school = SchoolName, 
+           PersonID, firstName = LegalFirstName, lastName = LegalLastName, 
+           planEnd)
+## Summary of teachers ----
 teacherSummary <- teacherStudentLink %>% 
-    group_by(teacher) %>% 
-    reframe(n =n(), 
-            school = first(school)) %>% 
-    arrange(desc(n)) %>% 
-    head(15)
-  
-schoolSummary <- teacherStudentLink %>% 
-    group_by(school) %>% 
-    reframe(n =n()) %>% 
-    arrange(desc(n)) %>% 
-    head(15)
+  group_by(teacher, school) %>% 
+  mutate(onPlanN = n()) %>% 
+  group_by(teacher, school, planEnd) %>% 
+  summarise(onPlanN = first(onPlanN), 
+            exitN = n(),
+            exitPct = exitN/onPlanN) %>% 
+  filter(planEnd == 1) %>% 
+  arrange(desc(exitN), desc(exitPct)) %>% 
+  head(15)
+
+## Summary of shools ----
+ schoolSummary <- teacherStudentLink %>% 
+  group_by(school) %>% 
+  mutate(onPlanN = n()) %>% 
+  group_by(school, planEnd) %>% 
+  summarise(onPlanN = first(onPlanN), 
+            exitN = n(),
+            exitPct = exitN/onPlanN) %>% 
+  filter(planEnd == 1) %>% 
+  arrange(desc(exitN), desc(exitPct)) %>% 
+  head(15)
 
   # Total Students in Cohort ----
   # Query of READ Plan Flag in Campus ----
@@ -1748,4 +1788,49 @@ AND
            readstatus == 'READ Plan') %>% 
     filter(proficiencyLongDescription == 'Well Below Benchmark')
   
+  # Explore enrollment of students who started plan in grade 3 ----
+  grade3Start <- flagStart %>% 
+    filter(planStart == '3- Start plan') %>% 
+    pull(personID)
+  
+  grade3NEnroll <- flagStart %>% 
+    filter(personID %in% grade3Start) %>% 
+    group_by(personID) %>% 
+    mutate(n = n()) %>% 
+    group_by(n) %>% 
+    summarise(sum = n())
+  
+  # Explore enrollment of students who started plan in grade 1 ----
+  grade1Start <- flagStart %>% 
+    filter(planStart == '1- Start plan') %>% 
+    pull(personID)
+  
+  grade1NEnroll <- flagStart %>% 
+    filter(personID %in% grade1Start) %>% 
+    group_by(personID) %>% 
+    mutate(n = n()) %>% 
+    group_by(n) %>% 
+    select(personID, Grade, n) %>% 
+    pivot_wider(names_from = Grade, 
+                values_from = n,
+                values_fn = sum) %>% 
+    filter(is.na(K) & is.na(PK)) %>% 
+    summarise(sum = n())
+  
+  # Explore enrollment of students who started plan in grade 2 ----
+  grade2Start <- flagStart %>% 
+    filter(planStart == '2- Start plan') %>% 
+    pull(personID)
+  
+  grade2NEnroll <- flagStart %>% 
+    filter(personID %in% grade2Start) %>% 
+    group_by(personID) %>% 
+    mutate(n = n()) %>% 
+    group_by(n) %>% 
+    select(personID, Grade, n) %>% 
+    pivot_wider(names_from = Grade, 
+                values_from = n,
+                values_fn = sum) %>% 
+    filter(is.na(K) & is.na(PK) & is.na(`1`)) %>% 
+    summarise(sum = n())
   
