@@ -1434,4 +1434,231 @@ ggplot(data = filter(allYearsEnd, planEnd != 'No Plan End'),
         legend.title = element_blank()
   )
 
+# Combine all Cohorts ----
+## combine cohorts ----
+data24 <- cohort24$flagStartFilledFlag
+data23 <- cohort23$flagStartFilledFlag
+data22 <- cohort22$flagStartFilledFlag
+data21 <- cohort21$flagStartFilledFlag
+
+flagStartFilledFlag <- data24 %>% 
+  bind_rows(data23) %>% 
+  bind_rows(data22) %>% 
+  bind_rows(data21)
+
+## Summarize student groups by exit status ----
+allEoyGroupSummary <- flagStartFilledFlag %>% 
+  pivot_longer(cols = c(raceBin, mlBin, iepBin, frlBin, gtBin,jsel, jeffcoPk, childFind, remoteKinder), 
+               names_to = 'category', 
+               values_to = 'categoryValue') %>% 
+  ungroup() %>% 
+  mutate(n = n_distinct(personID)) %>% 
+  group_by(planEnd) %>% 
+  mutate(planN = n_distinct(personID)) %>% 
+  group_by(category, categoryValue) %>% 
+  mutate(categoryN = n_distinct(personID)) %>% 
+  group_by(category, categoryValue, planEnd) %>% 
+  summarise(n = first(n), 
+            planN = first(planN),
+            groupN = n_distinct(personID),
+            categoryN = first(categoryN),
+            groupPct = groupN/categoryN
+  )  %>% 
+  filter(planEnd == 'Exit plan') %>% 
+  mutate(categoryValue = replace_na(categoryValue, 0), 
+         categoryValue = factor(categoryValue, 
+                                levels = 1:0, 
+                                labels = c('Yes', 'No'))) %>% 
+  mutate(category = factor(category, 
+                           levels = c( 
+                             'frlBin', 
+                             'iepBin', 
+                             'mlBin', 
+                             'raceBin', 
+                             'remoteKinder', 
+                             'childFind',
+                             'jeffcoPk', 
+                             'jsel', 
+                             'gtBin'), 
+                           labels = c(
+                             'Free or Reduced Lunch Eligible', 
+                             'Individual Education Program', 
+                             'Multilingual Learner Program', 
+                             'Students of Color or Hispanic', 
+                             'Remote Learning Program', 
+                             'ChildFind Program',
+                             'Jeffco PK Program', 
+                             'Jeffco Summer Learning Program >10 days', 
+                             'Gifted and Talented Program'
+                           )
+  )) %>% 
+  group_by(category) %>% 
+  arrange(category, categoryValue)
+
+allEoyGroupSummaryTable <- gt(allEoyGroupSummary) %>% 
+  cols_label(categoryValue = 'Group Status', 
+             groupN = 'Students in Exit Status', 
+             categoryN = 'Total', 
+             groupPct = 'Percent') %>% 
+  cols_hide(c(planEnd, n, planN)) %>%
+  fmt_percent(groupPct, decimals = 0) %>% 
+  fmt_number(categoryN, decimals = 0) %>% 
+  tab_header(title = 'Percent of Students Who Exited READ Plan By The End of Grade 3', 
+             subtitle =  paste0('Grade 3 in ' , .endYear)) %>% 
+  cols_align(
+    align = c("left"),
+    columns = categoryValue
+  ) %>% 
+  cols_align(
+    align = c("center"),
+    columns = c(groupN, categoryN, groupPct)
+  ) %>% 
+  opt_table_outline() %>% 
+  tab_style(
+    cell_fill('grey'), 
+    cells_row_groups()
+  ) %>% 
+  tab_options(
+    table.font.size = 12
+  )
+
+
+
+## Proportion Testing ----
+propTestGroups <- function(.cat) {
+  allEoyGroups <- flagStartFilledFlag %>% 
+    pivot_longer(cols = c(raceBin, mlBin, iepBin, frlBin, gtBin,jsel, jeffcoPk, childFind, remoteKinder), 
+                 names_to = 'category', 
+                 values_to = 'categoryValue') %>% 
+    ungroup() %>% 
+    mutate(planEnd = ifelse(planEnd== 'Exit plan', 1, 0)) %>% 
+    mutate(categoryValue = replace_na(categoryValue, 0)) %>% 
+    select(category, categoryValue, planEnd) %>% 
+    filter(category == .cat) %>% 
+    mutate(n = n()) %>% 
+    group_by(planEnd, categoryValue) %>% 
+    reframe(planEndN = n())
+  
+  xValues <- allEoyGroups %>% 
+    filter(planEnd == 1) %>% 
+    pull(planEndN)
+  
+  nValues <- allEoyGroups %>% 
+    filter(planEnd == 0) %>% 
+    pull(planEndN)
+  
+  prop.test(x = xValues, 
+            n = nValues,
+            conf.level = 0.95)
+}
+
+propTestGroups(.cat= 'childFind') 
+
+categoryValues <- c('raceBin', 'mlBin', 'iepBin', 
+                    'frlBin', 'gtBin','jsel', 
+                    'jeffcoPk', 'childFind', 'remoteKinder')
+
+propTtestResults <-   map(categoryValues, propTestGroups)
+
+pValues <- data.frame(category = categoryValues, 
+                      p = c(propTtestResults[[1]][["p.value"]], 
+                            propTtestResults[[2]][["p.value"]], 
+                            propTtestResults[[3]][["p.value"]],
+                            propTtestResults[[4]][["p.value"]],
+                            propTtestResults[[5]][["p.value"]],
+                            propTtestResults[[6]][["p.value"]],
+                            propTtestResults[[7]][["p.value"]], 
+                            propTtestResults[[8]][["p.value"]], 
+                            propTtestResults[[9]][["p.value"]])) %>% 
+  mutate(p = round(p, 4)) %>% 
+  mutate(pFlag = case_when(
+    p < 0.05 ~ 1, 
+    TRUE ~ 0
+  )) %>% 
+  mutate(category = factor(category, 
+                           levels = c( 'frlBin', 'iepBin', 'raceBin', 
+                                       'mlBin','jsel', 'jeffcoPk', 
+                                       'childFind', 'remoteKinder', 'gtBin'), 
+                           labels = c( 'FRL', 'IEP', 'Students of Color', 
+                                       'ML Program','JSEL', 'Jeffco PK', 
+                                       'ChildFind', 'Remote Learning', 'GT'))) %>% 
+  arrange(category) %>% 
+  mutate(
+    pFlag = ifelse(pFlag == 1, "check", "x")
+  )
+
+pValuesTable <- gt(pValues) %>% 
+  cols_label(category = 'Student Group', 
+             p = 'p-value',
+             pFlag  = ' ') %>% 
+  tab_header(title = 'Pvalues of students who exited READ Plan by the end of grade 3') %>% 
+  cols_align(align = 'left', columns = category) %>% 
+  fmt_icon(columns = pFlag, 
+           fill_color = list('check' = 'grey', 'x' = 'white')) %>% 
+  tab_footnote(footnote =  md(glue::glue("{fontawesome::fa('check')} = Significant difference")))
+
+## Effect Size ----
+effectSizeGroups <- function(.cat) {
+  allEoyGroups <- cohort21$flagStartFilledFlag %>% 
+    pivot_longer(cols = c(raceBin, mlBin, iepBin, frlBin, gtBin,jsel, jeffcoPk, childFind, remoteKinder), 
+                 names_to = 'category', 
+                 values_to = 'categoryValue') %>% 
+    ungroup() %>% 
+    # mutate(planEnd = str_remove(planEnd, "^.{0,3}")) %>% 
+    mutate(planEnd = ifelse(planEnd == 'Exit plan', 1, 0)) %>% 
+    mutate(categoryValue = replace_na(categoryValue, 0), 
+           planEnd = replace_na(planEnd, 0)) %>% 
+    select(category, categoryValue, planEnd) %>% 
+    filter(category == .cat) %>% 
+    arrange(planEnd)
+  
+  categoryValue <- allEoyGroups$categoryValue
+  planEnd <- allEoyGroups$planEnd
+  
+  cohen.d(categoryValue,  planEnd)
+}
+
+
+effectSizeGroups(.cat= 'childFind') 
+
+categoryValues <- c('raceBin', 'mlBin', 'iepBin', 
+                    'frlBin', 'gtBin','jsel', 
+                    'jeffcoPk', 'childFind', 'remoteKinder')
+
+effectSizeResults <-   map(categoryValues, effectSizeGroups)
+
+
+effectSize <- data.frame(category = categoryValues, 
+                         d = c(effectSizeResults[[1]][["estimate"]], 
+                               effectSizeResults[[2]][["estimate"]], 
+                               effectSizeResults[[3]][["estimate"]],
+                               effectSizeResults[[4]][["estimate"]],
+                               effectSizeResults[[5]][["estimate"]],
+                               effectSizeResults[[6]][["estimate"]],
+                               effectSizeResults[[7]][["estimate"]], 
+                               effectSizeResults[[8]][["estimate"]], 
+                               effectSizeResults[[9]][["estimate"]])) %>% 
+  mutate(d = round(d, 2)) %>% 
+  # mutate(pFlag = case_when(
+  #   d < 0.05 ~ 1, 
+  #   TRUE ~ 0
+  # )) %>% 
+  mutate(category = factor(category, 
+                           levels = c( 'frlBin', 'iepBin', 'raceBin', 
+                                       'mlBin','jsel', 'jeffcoPk', 
+                                       'childFind', 'remoteKinder', 'gtBin'), 
+                           labels = c( 'FRL', 'IEP', 'Students of Color', 
+                                       'ML Program','JSEL', 'Jeffco PK', 
+                                       'ChildFind', 'Remote Kinder', 'GT'))) %>% 
+  arrange(category) 
+# >% 
+#   mutate(
+#     pFlag = ifelse(pFlag == 1, "check", "x")
+#   )
+
+gt(effectSize) %>% 
+  cols_label(category = 'Student Group', 
+             d = 'effect size') %>% 
+  tab_header(title = "Cohen's D value of students who exited READ Plan by the end of grade 3") %>% 
+  cols_align(align = 'left', columns = category) 
             
