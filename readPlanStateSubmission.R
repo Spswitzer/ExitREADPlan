@@ -34,7 +34,8 @@ qryREADPlanSubmission <- odbc::dbGetQuery(con,
 
 # Remove records noted as excluded ----
 readCleaned <- qryREADPlanSubmission %>% 
-  clean_names('lower_camel') %>% 
+  clean_names('lower_camel') %>%
+  filter(withdrew == 0) %>% 
   filter(is.na(excluded)) %>% 
   filter(gradeId < 4)
 
@@ -89,7 +90,7 @@ planByYear <- function(.endyear = 2021) {
   return(gradesTable)
 }
 
-planByYear(2024)
+planByYear(2021)
 
 ## Summarise services students recieved for SRD ----
 # readServices <- readCleaned %>% 
