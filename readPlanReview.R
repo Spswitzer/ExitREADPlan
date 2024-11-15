@@ -18,6 +18,21 @@ planEnd <- flagStart %>%
 
 toString(planEnd)
 
+NoPlanEnd <- flagStart %>% 
+  select(personID, planStart, planEnd) %>% 
+  mutate(planStart = str_remove(planStart, '- Start plan'), 
+         planEnd = str_remove(planEnd, '- Exit plan')) %>% 
+  pivot_longer(c(planStart, planEnd), 
+               names_to = 'status') %>% 
+  filter(!is.na(value)) %>% 
+  pivot_wider(names_from = status, 
+              values_from = value) %>% 
+  ungroup() %>% 
+  filter(is.na(planEnd)) %>% 
+  pull(personID)
+
+
+
 # connect to SQL database ----
 con <- dbConnect(odbc(),
                  Driver = "SQL Server",
@@ -27,7 +42,7 @@ con <- dbConnect(odbc(),
 
 sort(unique(odbcListDrivers()[[1]]))
 
-# Need Focus Area Result ----
+# Need Focus Area Result Exited students only----
 qrystudentFocusAreas <- odbc::dbGetQuery(con, 
                                          "
   SELECT
@@ -35,15 +50,10 @@ qrystudentFocusAreas <- odbc::dbGetQuery(con,
    ,tStudentNeed.FirstName
    ,tStudentNeed.LastName
    ,tStudentNeed.PersonID
-   --,tStudentNeed.ConcernStartDate
-  -- ,tStudentNeed.LastUpdatedDate
    ,tFocusArea.FocusAreaName
-  --  ,tGoal.GoalStartDate
-  -- ,tGoal.GoalEndDate
    ,tGoal.GoalID
    ,tStudentNeedFocusArea.StartDate
    ,tStudentNeedFocusArea.FocusAreaID
-  
 FROM
     dbSOARS.rti.tStudentNeed (NOLOCK)
   JOIN dbSOARS.rti.tStudentNeedFocusArea (NOLOCK) ON
@@ -54,7 +64,6 @@ FROM
    tNeedType.NeedTypeID = tStudentNeed.NeedTypeID
   JOIN dbSOARS.rti.tFocusArea (NOLOCK) ON
    tFocusArea.FocusAreaID = tStudentNeedFocusArea.FocusAreaID
-
 WHERE
     tNeedType.NeedTypeName = 'READ'
   AND 
@@ -65,11 +74,47 @@ WHERE
     tStudentNeed.ConcernStartDate
 "
 )
+
+## Query for all students ----
+qrystudentFocusAreas <- odbc::dbGetQuery(con, 
+                                         "
+  SELECT
+   tStudentNeed.studentNeedID
+   ,tStudentNeed.FirstName
+   ,tStudentNeed.LastName
+   ,tStudentNeed.PersonID
+   ,tFocusArea.FocusAreaName
+   ,tGoal.GoalID
+   ,tStudentNeedFocusArea.StartDate
+   ,tStudentNeedFocusArea.FocusAreaID
+FROM
+    dbSOARS.rti.tStudentNeed (NOLOCK)
+  JOIN dbSOARS.rti.tStudentNeedFocusArea (NOLOCK) ON
+    tStudentNeedFocusArea.StudentNeedID = tStudentNeed.StudentNeedID
+  JOIN dbSOARS.rti.tGoal (NOLOCK) ON
+    tGoal.StudentNeedID = tStudentNeed.StudentNeedID
+  JOIN dbSOARS.rti.tNeedType (NOLOCK) ON
+   tNeedType.NeedTypeID = tStudentNeed.NeedTypeID
+  JOIN dbSOARS.rti.tFocusArea (NOLOCK) ON
+   tFocusArea.FocusAreaID = tStudentNeedFocusArea.FocusAreaID
+WHERE
+    tNeedType.NeedTypeName = 'READ'
+  AND 
+    tStudentNeed.ActiveFlag = 1
+  ORDER BY
+    tStudentNeed.ConcernStartDate
+"
+)
+
+
+
+
 unique(qrystudentFocusAreas$PersonID)
 
 ## Summarize goal focus areas ----
 planFocusAreas <- qrystudentFocusAreas %>% 
   clean_names('lower_camel') %>% 
+  filter(personId %in% NoPlanEnd) %>% 
   select(studentNeedId, firstName, lastName, personId, 
          focusAreaName, focusAreaId, focusStartDate = startDate) %>% 
   mutate(focusStartDate = as_date(focusStartDate), 
@@ -114,7 +159,7 @@ planAndFlag <- data.frame(personID = unique(qrystudentFocusAreas$PersonID)) %>%
   mutate(plan = 'Y')
 
 planFlag <- flagStart %>% 
-  filter(planEnd %in% c( 'K- Exit plan','3- Exit plan', '2- Exit plan', '1- Exit plan')) %>% 
+  filter(planEnd %in% c('K- Exit plan','3- Exit plan', '2- Exit plan', '1- Exit plan')) %>% 
   select(personID, planEnd)
 
 noPlanYesFlag <- planAndFlag %>% 
@@ -159,6 +204,67 @@ gt(planFocusAreasPlanEndGrade) %>%
     columns = c(focusAreaCountPct)
   ) %>% 
   cols_hide(c(N, focusAreaCount, planEndN))%>% 
+  fmt_percent(focusAreaCountPct, decimals = 0) %>% 
+  opt_table_outline() %>% 
+  tab_style(
+    cell_fill('grey'), 
+    cells_row_groups()
+  ) %>% 
+  tab_options(
+    table.font.size = 12
+  ) 
+
+## Grouped by plan year Revised Approach----
+planFocusAreasPlanYear <- qrystudentFocusAreas %>% 
+  clean_names('lower_camel') %>% 
+  filter(personId %in% NoPlanEnd) %>% 
+  select(studentNeedId, firstName, lastName, personId, 
+         focusAreaName, focusAreaId, focusStartDate = startDate) %>% 
+  mutate(focusStartDate = as_date(focusStartDate), 
+         focusStartDate = ymd(focusStartDate)) %>% 
+  full_join(planFlag, join_by(personId == personID)) %>% 
+  filter(!is.na(studentNeedId)) %>% 
+  mutate(N = n_distinct(personId)) %>%
+  mutate(gradeLevel = case_when(
+    focusStartDate >= '2020-08-01' & focusStartDate <='2021-05-30' ~ 0, 
+    focusStartDate >= '2021-08-01' & focusStartDate <='2022-05-30' ~ 1, 
+    focusStartDate >= '2022-08-01' & focusStartDate <='2023-05-30' ~ 2, 
+    focusStartDate >= '2023-08-01' & focusStartDate <='2024-05-30' ~ 3, 
+    TRUE ~ 9
+  )) %>% 
+  filter(gradeLevel != 9) %>% # 18 students with goal focus areas before K, repeated K
+  group_by(gradeLevel) %>% 
+  mutate(gradeN = n_distinct(personId)) %>% 
+  arrange(personId, focusAreaId, focusStartDate, gradeLevel) %>% 
+  group_by(personId, focusAreaId, focusStartDate, focusAreaName, N, gradeLevel) %>% 
+  summarise(focusAreaName = first(focusAreaName), 
+            gradeN = first(gradeN)) %>% 
+  group_by(personId,  focusAreaName, N, gradeLevel, gradeN) %>% 
+  summarise(focusStartDate = max(focusStartDate)) %>% 
+  group_by(focusAreaName, N, gradeLevel, gradeN) %>% 
+  reframe(focusAreaCount = n()) %>% 
+  mutate(focusAreaCountPct = round(focusAreaCount/gradeN, 2)) %>% 
+  arrange(gradeLevel, desc(focusAreaCountPct)) %>% 
+  mutate(gradeLevel = factor(gradeLevel, 
+                             levels = 0:3, 
+                             labels = c('Kindergarten', '1st Grade', 
+                                        '2nd Grade', '3rd Grade'))) %>% 
+  group_by(gradeLevel)
+
+gt(planFocusAreasPlanYear) %>% 
+  cols_label(focusAreaName = 'Focus Area', 
+             focusAreaCountPct = 'Percent of Exited Plans') %>% 
+  tab_header(title = 'Plan Focus Areas for Students Who Exited READ Plan By The End of Grade 3', 
+             subtitle = '2020-2021 Kindergarten Student Cohort (Grade 3 in 2023-2024)') %>% 
+  cols_align(
+    align = c("left"),
+    columns = focusAreaName
+  ) %>% 
+  cols_align(
+    align = c("center"),
+    columns = c(focusAreaCountPct)
+  ) %>% 
+  cols_hide(c(N, focusAreaCount, gradeN))%>% 
   fmt_percent(focusAreaCountPct, decimals = 0) %>% 
   opt_table_outline() %>% 
   tab_style(
