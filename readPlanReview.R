@@ -476,3 +476,90 @@ tStudentNeed.PersonID IN (1453134, 1492205, 1492288, 1495409, 1495426, 1517773, 
 "
 )
 
+
+library(tidytext)
+
+#Create table from https://www.cde.state.co.us/coloradoliteracy/advisorylistofinstructionalprogramming2020#intervention
+
+interventionWords <- c('orton', 'og', #imse and Yoshimoto are paired with OG
+                       'lexia', # core 5 is paired with lexia in all exited instances
+                       'burst', 
+                       '95', 
+                       'sipps', 
+                       'i-ready', 'iready', 
+                       'istation', 'station','i-station', 
+                       'hmh', 'into reading', 
+                       'heggerty', 
+                       'lli:', 'leveled literacy',
+                       'ckla',
+                       '^(.*)open court',
+                       '^(.*)bridge the gap', 
+                       'mindplay',
+                       'wonderworks',
+                       'blast', '^(.*)really great', #blast is paired with really great
+                       'countdown', # countdown is paired with really great
+                       'hd', '^(.*)hd word', #hd is paired with high dosage tutoring and really great and hd word
+                       'naturally', '^(.*)read natually', '^(.*)read live',
+                       'kilptrick',
+                       '^(.*)reading corps', 'americorps', 
+                       'wilson', 'fundations',
+                       'voyager',
+                       'ufli',
+                       '^(.*)valley speech', 
+                       'icali', 'cali', 
+                       '^(.*)el education',
+                       'wonders',
+                       'boost',
+                       '^(.*)six minute', '^(.*)six-minute',
+                       'spire',
+                       'spot on', 
+                       'ixl', 
+                       'raz',
+                       'amplify')
+
+instructionInventions <- qrystudentPlan %>% 
+  clean_names('lower_camel') %>% 
+  # select(personId, instructionDescription, instructionId) %>%
+  # filter(personId == 1453134) %>%
+  mutate(
+    intervention = instructionDescription %>%
+      str_to_lower() %>%
+      str_squish() %>% #remove whitespace
+      str_extract_all(
+        str_c(
+          interventionWords
+          , collapse = "|")
+        )
+    ) %>% 
+  unnest_longer(intervention, keep_empty = TRUE) %>% 
+  # filter(!is.na(intervention)) %>%
+  mutate(interventionSimple = case_when(
+    str_detect(intervention, 'really great') ~ 'really great', 
+    str_detect(intervention, 'i-ready') ~ 'iready',
+    str_detect(intervention, 'i-station') | 
+      str_detect(intervention, 'station') ~ 'istation',
+    str_detect(intervention, 'open court') ~ 'open court',
+    str_detect(intervention, 'into reading') ~ 'into reading',
+    str_detect(intervention, 'bridge the gap') ~ 'bridge the gap', 
+    str_detect(intervention, 'hd word') ~ 'hd', 
+    str_detect(intervention, 'naturally') | 
+      str_detect(intervention, 'read live') | 
+      str_detect(intervention, 'read natually') ~ 'read natually', 
+    str_detect(intervention, 'reading corps') ~'reading corps', 
+    str_detect(intervention, 'valley speech') ~ 'valley speech', 
+    str_detect(intervention, 'cali') | 
+      str_detect(intervention, 'icali') ~ 'icali', 
+    str_detect(intervention, 'spot on') ~ 'spot on', 
+    str_detect(intervention, 'six minute') | 
+      str_detect(intervention, 'six-minute') ~ 'six minute',
+    str_detect(intervention, 'orton') | 
+      str_detect(intervention, 'og') ~ 'og',
+    str_detect(intervention, 'lli:') | 
+      str_detect(intervention, 'leveled literacy') ~ 'leveled literacy Intervention',
+    is.na(intervention) ~ 'no cde approved instruction',
+    TRUE ~ intervention
+)) %>% 
+  distinct(personId, instructionId, instructionTypeName, smartGoal, .keep_all = T) %>% 
+  ungroup() %>% 
+  select(firstName, lastName, personId, instructionId, intervention, 
+            interventionSimple, instructionTypeName)
