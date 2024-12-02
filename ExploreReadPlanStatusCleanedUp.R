@@ -647,6 +647,7 @@ ggplot(data = grade3ExitedCMAS,
         legend.title = element_blank(), 
         panel.grid =  element_blank())
 
+library(legendry)
 # Correlation between plan Exit in grade 3 and CMAS proficiency ----
 flagGrade3Cor <- flagStart %>% 
   filter(gradeInt == 3, 
@@ -736,7 +737,7 @@ shortPlan <- grade3ExitedCMASAll %>%
   filter(studentPlanLength < 2)
 
 ## Explore the DIBELS performance levels of students from cohort alongside their READ Plan info ----
-### must recent DIBELS results ----
+### most recent DIBELS results ----
 #### Filter to English testing ----
 dibelsCombined <- dibels8Grade3 %>% 
   full_join(dibels6) %>% 
@@ -1495,6 +1496,7 @@ Course.homeroom
 ,Section.number
 ,Section.teacherDisplay
 ,SectionStudent.SchoolName
+,sectionStudent.CDESChoolNumber
 ,Roster.PersonID
 ,StudentDemographic.LegalFirstName
 ,StudentDemographic.LegalLastName
@@ -1544,15 +1546,20 @@ AND
 )
 
 studentExitGrade3 <- flagStart %>% 
-    # select(personID, Grade, planStart, planEnd) %>% 
-    # pivot_longer(c(planStart, planEnd), 
-    #               names_to = 'status') %>% 
    filter(Grade == '3' & EndYear == 2024) %>% 
   select(personID, CampusSchoolName, PlanStartDate, planEndDate) %>% 
   mutate(planEnd = if_else(is.na(planEndDate), 0, 1), 
          planStart = if_else(!is.na(PlanStartDate), 1, 0)) %>% 
   select(personID, planStart, planEnd)
 
+## October Count Students ----
+totalGradeThree <- read.csv('C:/Users/sswitzer/Documents/GitHub/ExitREADPlan/data/2023-24_Membership_Grade_bySchool.csv') %>% 
+  clean_names('lower_camel') %>% 
+  filter(organizationCode == '1420', 
+         x3Rd > 0) %>% 
+  select(schoolCode, grade3Count = x3Rd) %>% 
+  mutate(grade3Count = as.numeric(grade3Count)) %>% 
+  mutate(schoolCode = str_pad(schoolCode, 4, 'left', '0'))
     
 teacherStudentLink <- qryStudentRoster %>% 
     right_join(studentExitGrade3, 
@@ -1561,32 +1568,50 @@ teacherStudentLink <- qryStudentRoster %>%
     filter(homeroom == TRUE) %>% 
     distinct(PersonID, .keep_all = T) %>%
     filter(!is.na(courseID)) %>% 
-    select(teacher = teacherDisplay, school = SchoolName, 
+    select(teacher = teacherDisplay, schoolCode = CDESChoolNumber, school = SchoolName, 
            PersonID, firstName = LegalFirstName, lastName = LegalLastName, 
-           planEnd)
+           planEnd) %>% 
+  full_join(totalGradeThree)
+
 ## Summary of teachers ----
 teacherSummary <- teacherStudentLink %>% 
-  group_by(teacher, school) %>% 
-  mutate(onPlanN = n()) %>% 
+  group_by(teacher, schoolCode) %>% 
+  mutate(onPlanN = n(),
+         onPlanPct = round(onPlanN/grade3Count, 2)
+         ) %>% 
   group_by(teacher, school, planEnd) %>% 
-  summarise(onPlanN = first(onPlanN), 
-            exitN = n(),
-            exitPct = exitN/onPlanN) %>% 
-  filter(planEnd == 1) %>% 
-  arrange(desc(exitN), desc(exitPct)) %>% 
-  head(15)
+  summarise(
+    grade3Count = first(grade3Count),
+         onPlanN = first(onPlanN), 
+         onPlanPct = first(onPlanPct),
+         exitN = n(), 
+         exitPct = round(exitN/onPlanN, 2)) %>% 
+  filter(planEnd == 1, 
+         exitPct > .21, 
+         onPlanPct > .20) %>% 
+  arrange(desc(onPlanPct), desc(exitPct)) %>% 
+  head(15) %>% 
+  select(-planEnd) %>% 
+  mutate(school = str_remove(school, 'Elementary')) %>% 
+  arrange(dec(exitPct))
 
-## Summary of shools ----
+## Summary of schools ----
  schoolSummary <- teacherStudentLink %>% 
   group_by(school) %>% 
-  mutate(onPlanN = n()) %>% 
+  mutate(onPlanN = n(), 
+         onPlanPct = round(onPlanN/grade3Count, 2)) %>% 
   group_by(school, planEnd) %>% 
-  summarise(onPlanN = first(onPlanN), 
+  summarise(grade3Count = first(grade3Count),
+            onPlanN = first(onPlanN), 
+            onPlanPct = first(onPlanPct),
             exitN = n(),
-            exitPct = exitN/onPlanN) %>% 
-  filter(planEnd == 1) %>% 
-  arrange(desc(exitN), desc(exitPct)) %>% 
-  head(15)
+            exitPct = round(exitN/onPlanN, 2)) %>% 
+  filter(planEnd == 1, 
+         exitPct > .21, 
+         onPlanPct > .33) %>% 
+  arrange(desc(onPlanPct), desc(exitPct)) %>% 
+  head(15) %>% 
+  select(-planEnd)
 
   # Total Students in Cohort ----
   # Query of READ Plan Flag in Campus ----
