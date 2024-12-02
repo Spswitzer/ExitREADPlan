@@ -318,7 +318,10 @@ qrystudentPlan <- odbc::dbGetQuery(con,
    ,tInstruction.InstructionFrequencyTypeID
    ,tInstructionType.InstructionTypeName
    ,tImplementerRole.ImplementerRoleName
-   ,tGoal.ParentAcknowledgeDate
+  -- ,tGoal.ParentAcknowledgeDate
+  --  ,tStudentFilterType.StartDateParentAcknowledgeDate
+  --  ,tStudentFilterType.EndDateParentAcknowledgeDate
+  --  ,tFilterType.InternalCD
    ,tGoal.SmartGoal --must be at end of query
 FROM
     dbSOARS.rti.tStudentNeed (NOLOCK)
@@ -345,10 +348,16 @@ FROM
    tInstructionFrequencyType.InstructionFrequencyTypeID = tInstruction.InstructionFrequencyTypeID
   JOIN dbSoars.rti.tInstructionType (NOLOCK) ON
     tInstructionType.InstructionTypeID = tInstruction.InstructionTypeID
+--  JOIN dbSoars.dbo.tStudentFilterType (NOLOCK) ON
+--    tStudentFilterType.personID = tStudentNeed.PersonID
+--  JOIN dbSoars.dbo.tFilterType (NOLOCK) ON
+--    tFilterType.FilterID = tStudentFilterType.FilterID
 WHERE
     tNeedType.NeedTypeName = 'READ'
   AND 
     tStudentNeed.ActiveFlag = 1
+  --AND 
+  --  tFilterType.InternalCD = 'READ'
   AND
 tStudentNeed.PersonID IN (1453134, 1492205, 1492288, 1495409, 1495426, 1517773, 1518327, 1521347, 1522073, 1522625, 1523935, 1526117, 1527399, 1548566, 1554950, 1557323, 1557545, 1558787, 1560641, 1561011, 1561744, 1563560, 1565192, 1566037, 1572832, 1580806, 1581982, 1583060, 1584033, 1587167, 1588190, 1589221, 1589621, 1590608, 1596932, 1599992, 1610465, 1610644, 1611546, 1615543, 1616123, 1619775, 1622387, 1623016, 1623318, 1623643, 1623736, 1625455, 1625660, 1626000, 1626044, 1626642, 1626897, 1628873, 1629266, 1629838, 1630073, 1630077, 1630521, 1630794, 1631475, 1631604, 1632307, 1632517, 1632653, 1634300, 1634322, 1635250, 1635412, 1635503, 1637459, 1637830, 1641268, 1641914, 1642917, 1643060, 1644105, 1644629, 1644647, 1644670, 1645397, 1645712, 1646453, 1646863, 1647125, 1651303, 1652729, 1653977, 1654739, 1655740, 1656982, 1657085, 1657406, 1658165, 1658731, 1661663, 1662029, 1664117, 1665255, 1665361, 1666235, 1666305, 1667736, 1672131, 1672419, 1672680, 1672956, 1673312, 1675167, 1676192, 1676294, 1676418, 1676546, 1678435, 1678964, 1682050, 1682715, 1682928, 1685526, 1686209, 1687566, 1687715, 1687910, 1690600, 1690772, 1690890, 1691704, 1691920, 1692053, 1692474, 1692480, 1692561, 1692762, 1692953, 1693215, 1693230, 1693743, 1694249, 1694301, 1694566, 1694921, 1695545, 1695750, 1696586, 1696780, 1697135, 1698074, 1698623, 1698689, 1698764, 1698909, 1698980, 1699014, 1699292, 1699763, 1700714, 1701627, 1703648, 1705635, 1706041, 1707524, 1708279, 1715098, 1715155, 1715175, 1716487, 1716495, 1721741, 1723678, 1727420, 1728564, 1728570, 1733518, 1734217, 1735370, 1735937, 1736424, 1736682, 1736819, 1736898, 1737029, 1737032, 1737454, 1740349, 1740750, 1741670, 1741997, 1742076, 1743646, 1744669, 1744718, 1745204, 1745838, 1746453, 1747217, 1748408, 1753356, 1753395, 1754366, 1759355, 1759768, 1759985, 1761226, 1761227, 1761739, 1761800, 1761924, 1761968, 1761999, 1762278, 1762642, 1762816, 1762834, 1762867, 1762868, 1762902, 1762908, 1762916, 1763104, 1763107, 1763271, 1763572, 1763643, 1763752, 1763961, 1764114, 1764539, 1764580, 1764610, 1764958, 1765131, 1765183, 1765236, 1765612, 1765624, 1765780, 1765827, 1765933, 2224429, 2225243, 2225351, 2225394, 2225481, 2225610, 2225681, 2225745, 2225776, 2225790, 2225975, 2226138, 2226510, 2226533, 2226723, 2226746, 2226901, 2226916, 2226979, 2227098, 2227108, 2227375, 2227407, 2227476, 2227615, 2227764, 2227782, 2227804, 2227885, 2227997, 2228195, 2228347, 2228444, 2228571, 2229940, 2230040, 2230174, 2230204, 2230216, 2230222, 2230283, 2230475, 2231058, 2231180, 2231223, 2231226, 2231229, 2231530, 2231595, 2232722, 2232769, 2232796, 2234137, 2234872, 2235446, 2235574, 2235614, 2235634, 2235635, 2235674, 2235781, 2235976, 2236084, 2236101, 2236166, 2236409, 2236442, 2236471, 2236480, 2236586, 2237214, 2237720, 2238027, 2238038, 2238168, 2238284, 2238308, 2238684, 2239002, 2239152, 2239435, 2239449, 2239514, 2239604, 2239624, 2239634, 2239929, 2240050, 2240059, 2240062, 2240124, 2240177, 2240583, 2241219, 2241291, 2241682, 2241817, 2241859, 2241904, 2241978, 2242101, 2242208, 2242364, 2242736, 2243219, 2243223, 2243324, 2243611, 2243683, 2243752, 2243788, 2244119, 2244122, 2244148, 2244858, 2244860, 2244862, 2245234, 2245496, 2246137, 2248247, 2248475, 2248841, 2250874, 2256232, 2256241, 2257869, 2261264, 2267177, 2267331, 2269294, 2270072, 2271165, 2274088, 2276275, 2276556, 2276959, 2277056, 2277330, 2277450, 2277464, 2277632, 2278431, 2278934, 2279185, 2279487, 2280657, 2280747, 2280950, 2281070, 2282314, 2285074, 2286327, 2286457, 2286638, 2287001, 2287463, 2287500, 2298439, 2298739, 2299772, 2303033, 2311833, 2319955, 2324065, 2326786, 2329402, 2332320) --Exited students
   ORDER BY
@@ -411,7 +420,8 @@ feqIntDur <- cleanPlans %>%
 # Need Progress Monitoring Result ----
 qrystudentProgress <- odbc::dbGetQuery(con, 
                                    "
- SELECT DISTINCT
+ SELECT 
+  DISTINCT
    tStudentNeed.studentNeedID
    ,tStudentNeed.FirstName
    ,tStudentNeed.LastName
@@ -426,13 +436,19 @@ qrystudentProgress <- odbc::dbGetQuery(con,
    ,tInstruction.InstructionFrequencyTypeID
    ,tInstructionType.InstructionTypeName
    ,tImplementerRole.ImplementerRoleName
-   ,tGoal.ParentAcknowledgeDate
+   --,tGoal.ParentAcknowledgeDate
+   ,tGoal.ProgressMonitoring
    ,tProgress.ProgressResultNameID
    ,tProgress.ProgressDate
    ,tProgress.LastUpdatedDate AS prgressLastUpdate
    ,tProgressResult.ProgressValue
    ,tProgressResult.ProgressResultShortDescription
    ,tMonitoringFrequencyType.MonitoringFrequencyTypeName
+  ,tGoal.GoalStartDate
+   ,tGoal.GoalEndDate
+  ,tGoal.CreatedDate
+  -- ,tGoal.LastUpdatedDate
+   ,tGoal.GoalID
    ,tGoal.SmartGoal --must be at end of query
 FROM
   dbSOARS.rti.tStudentNeed (NOLOCK)
@@ -447,9 +463,12 @@ FROM
   JOIN dbSOARS.rti.tGoalInstruction (NOLOCK) ON
     tGoalInstruction.GoalID = tGoal.GoalID
   JOIN dbSOARS.rti.tGoalFocusArea (NOLOCK) ON
-    tGoalFocusArea.GoalID = tGoal.GoalID
+    tGoalFocusArea.GoalID = tGoal.GoalID AND
+    tGoalFocusArea.GoalID = tGoalInstruction.GoalID
   JOIN dbSOARS.rti.tProgress(NOLOCK) ON
-   tProgress.GoalID = tGoal.GoalID
+   tProgress.GoalID = tGoal.GoalID AND
+  -- tProgress.LastUpdatedByStaffID = tGoal.LastUpdatedByStaffID AND
+   tProgress.GoalID = tGoalInstruction.GoalID 
   JOIN dbSOARS.rti.tProgressResult (NOLOCK) ON
    tProgressResult.ProgressResultNameID = tProgress.ProgressResultNameID
   JOIN dbSoArs.rti.tInstruction (NOLOCK) ON
@@ -457,6 +476,8 @@ FROM
      tInstruction.studentNeedID = tStudentNeed.studentNeedID
   JOIN dbSoars.rti.tFocusAreaDesignator (NOLOCK) ON
     tFocusAreaDesignator.FocusAreaID =  tStudentNeedFocusArea.FocusAreaID
+  JOIN dbSoars.rti.tDesignator (NOLOCK) ON
+    tDesignator.DesignatorID =  tFocusAreaDesignator.DesignatorID
   JOIN dbSoars.rti.tImplementerRole (NOLOCK) ON
     tImplementerRole.ImplementerRoleID = tInstruction.ImplementerRoleID
   JOIN dbSoars.rti.tInstructionFrequencyType (NOLOCK) ON
@@ -469,9 +490,39 @@ WHERE
     tNeedType.NeedTypeName = 'READ'
   AND 
     tStudentNeed.ActiveFlag = 1
+  AND 
+    tStudentNeedFocusArea.ActiveFlag = 1
+  AND 
+    tGoal.ActiveFlag = 1
+  AND 
+    tNeedType.ActiveFlag = 1
   AND
-tStudentNeed.PersonID IN (1453134, 1492205, 1492288, 1495409, 1495426, 1517773, 1518327, 1521347, 1522073, 1522625, 1523935, 1526117, 1527399, 1548566, 1554950, 1557323, 1557545, 1558787, 1560641, 1561011, 1561744, 1563560, 1565192, 1566037, 1572832, 1580806, 1581982, 1583060, 1584033, 1587167, 1588190, 1589221, 1589621, 1590608, 1596932, 1599992, 1610465, 1610644, 1611546, 1615543, 1616123, 1619775, 1622387, 1623016, 1623318, 1623643, 1623736, 1625455, 1625660, 1626000, 1626044, 1626642, 1626897, 1628873, 1629266, 1629838, 1630073, 1630077, 1630521, 1630794, 1631475, 1631604, 1632307, 1632517, 1632653, 1634300, 1634322, 1635250, 1635412, 1635503, 1637459, 1637830, 1641268, 1641914, 1642917, 1643060, 1644105, 1644629, 1644647, 1644670, 1645397, 1645712, 1646453, 1646863, 1647125, 1651303, 1652729, 1653977, 1654739, 1655740, 1656982, 1657085, 1657406, 1658165, 1658731, 1661663, 1662029, 1664117, 1665255, 1665361, 1666235, 1666305, 1667736, 1672131, 1672419, 1672680, 1672956, 1673312, 1675167, 1676192, 1676294, 1676418, 1676546, 1678435, 1678964, 1682050, 1682715, 1682928, 1685526, 1686209, 1687566, 1687715, 1687910, 1690600, 1690772, 1690890, 1691704, 1691920, 1692053, 1692474, 1692480, 1692561, 1692762, 1692953, 1693215, 1693230, 1693743, 1694249, 1694301, 1694566, 1694921, 1695545, 1695750, 1696586, 1696780, 1697135, 1698074, 1698623, 1698689, 1698764, 1698909, 1698980, 1699014, 1699292, 1699763, 1700714, 1701627, 1703648, 1705635, 1706041, 1707524, 1708279, 1715098, 1715155, 1715175, 1716487, 1716495, 1721741, 1723678, 1727420, 1728564, 1728570, 1733518, 1734217, 1735370, 1735937, 1736424, 1736682, 1736819, 1736898, 1737029, 1737032, 1737454, 1740349, 1740750, 1741670, 1741997, 1742076, 1743646, 1744669, 1744718, 1745204, 1745838, 1746453, 1747217, 1748408, 1753356, 1753395, 1754366, 1759355, 1759768, 1759985, 1761226, 1761227, 1761739, 1761800, 1761924, 1761968, 1761999, 1762278, 1762642, 1762816, 1762834, 1762867, 1762868, 1762902, 1762908, 1762916, 1763104, 1763107, 1763271, 1763572, 1763643, 1763752, 1763961, 1764114, 1764539, 1764580, 1764610, 1764958, 1765131, 1765183, 1765236, 1765612, 1765624, 1765780, 1765827, 1765933, 2224429, 2225243, 2225351, 2225394, 2225481, 2225610, 2225681, 2225745, 2225776, 2225790, 2225975, 2226138, 2226510, 2226533, 2226723, 2226746, 2226901, 2226916, 2226979, 2227098, 2227108, 2227375, 2227407, 2227476, 2227615, 2227764, 2227782, 2227804, 2227885, 2227997, 2228195, 2228347, 2228444, 2228571, 2229940, 2230040, 2230174, 2230204, 2230216, 2230222, 2230283, 2230475, 2231058, 2231180, 2231223, 2231226, 2231229, 2231530, 2231595, 2232722, 2232769, 2232796, 2234137, 2234872, 2235446, 2235574, 2235614, 2235634, 2235635, 2235674, 2235781, 2235976, 2236084, 2236101, 2236166, 2236409, 2236442, 2236471, 2236480, 2236586, 2237214, 2237720, 2238027, 2238038, 2238168, 2238284, 2238308, 2238684, 2239002, 2239152, 2239435, 2239449, 2239514, 2239604, 2239624, 2239634, 2239929, 2240050, 2240059, 2240062, 2240124, 2240177, 2240583, 2241219, 2241291, 2241682, 2241817, 2241859, 2241904, 2241978, 2242101, 2242208, 2242364, 2242736, 2243219, 2243223, 2243324, 2243611, 2243683, 2243752, 2243788, 2244119, 2244122, 2244148, 2244858, 2244860, 2244862, 2245234, 2245496, 2246137, 2248247, 2248475, 2248841, 2250874, 2256232, 2256241, 2257869, 2261264, 2267177, 2267331, 2269294, 2270072, 2271165, 2274088, 2276275, 2276556, 2276959, 2277056, 2277330, 2277450, 2277464, 2277632, 2278431, 2278934, 2279185, 2279487, 2280657, 2280747, 2280950, 2281070, 2282314, 2285074, 2286327, 2286457, 2286638, 2287001, 2287463, 2287500, 2298439, 2298739, 2299772, 2303033, 2311833, 2319955, 2324065, 2326786, 2329402, 2332320) --Exited students
+    tFocusArea.ActiveFlag = 1
+  AND 
+    tGoalInstruction.ActiveFlag = 1
+  AND 
+    tProgress.ActiveFlag = 1
+  AND 
+    tProgressResult.ActiveFlag = 1
+  AND 
+    tInstruction.ActiveFlag = 1
+  AND 
+    tFocusAreaDesignator.ActiveFlag = 1
+  AND 
+    tImplementerRole.ActiveFlag = 1
+  AND 
+    tInstructionFrequencyType.ActiveFlag = 1
+  AND
+    tInstructionType.ActiveFlag = 1
+  AND 
+    tMonitoringFrequencyType.ActiveFlag = 1
+  AND 
+    tDesignator.ActiveFlag = 1
+  AND
+    tStudentNeed.PersonID IN (1453134, 1492205, 1492288, 1495409, 1495426, 1517773, 1518327, 1521347, 1522073, 1522625, 1523935, 1526117, 1527399, 1548566, 1554950, 1557323, 1557545, 1558787, 1560641, 1561011, 1561744, 1563560, 1565192, 1566037, 1572832, 1580806, 1581982, 1583060, 1584033, 1587167, 1588190, 1589221, 1589621, 1590608, 1596932, 1599992, 1610465, 1610644, 1611546, 1615543, 1616123, 1619775, 1622387, 1623016, 1623318, 1623643, 1623736, 1625455, 1625660, 1626000, 1626044, 1626642, 1626897, 1628873, 1629266, 1629838, 1630073, 1630077, 1630521, 1630794, 1631475, 1631604, 1632307, 1632517, 1632653, 1634300, 1634322, 1635250, 1635412, 1635503, 1637459, 1637830, 1641268, 1641914, 1642917, 1643060, 1644105, 1644629, 1644647, 1644670, 1645397, 1645712, 1646453, 1646863, 1647125, 1651303, 1652729, 1653977, 1654739, 1655740, 1656982, 1657085, 1657406, 1658165, 1658731, 1661663, 1662029, 1664117, 1665255, 1665361, 1666235, 1666305, 1667736, 1672131, 1672419, 1672680, 1672956, 1673312, 1675167, 1676192, 1676294, 1676418, 1676546, 1678435, 1678964, 1682050, 1682715, 1682928, 1685526, 1686209, 1687566, 1687715, 1687910, 1690600, 1690772, 1690890, 1691704, 1691920, 1692053, 1692474, 1692480, 1692561, 1692762, 1692953, 1693215, 1693230, 1693743, 1694249, 1694301, 1694566, 1694921, 1695545, 1695750, 1696586, 1696780, 1697135, 1698074, 1698623, 1698689, 1698764, 1698909, 1698980, 1699014, 1699292, 1699763, 1700714, 1701627, 1703648, 1705635, 1706041, 1707524, 1708279, 1715098, 1715155, 1715175, 1716487, 1716495, 1721741, 1723678, 1727420, 1728564, 1728570, 1733518, 1734217, 1735370, 1735937, 1736424, 1736682, 1736819, 1736898, 1737029, 1737032, 1737454, 1740349, 1740750, 1741670, 1741997, 1742076, 1743646, 1744669, 1744718, 1745204, 1745838, 1746453, 1747217, 1748408, 1753356, 1753395, 1754366, 1759355, 1759768, 1759985, 1761226, 1761227, 1761739, 1761800, 1761924, 1761968, 1761999, 1762278, 1762642, 1762816, 1762834, 1762867, 1762868, 1762902, 1762908, 1762916, 1763104, 1763107, 1763271, 1763572, 1763643, 1763752, 1763961, 1764114, 1764539, 1764580, 1764610, 1764958, 1765131, 1765183, 1765236, 1765612, 1765624, 1765780, 1765827, 1765933, 2224429, 2225243, 2225351, 2225394, 2225481, 2225610, 2225681, 2225745, 2225776, 2225790, 2225975, 2226138, 2226510, 2226533, 2226723, 2226746, 2226901, 2226916, 2226979, 2227098, 2227108, 2227375, 2227407, 2227476, 2227615, 2227764, 2227782, 2227804, 2227885, 2227997, 2228195, 2228347, 2228444, 2228571, 2229940, 2230040, 2230174, 2230204, 2230216, 2230222, 2230283, 2230475, 2231058, 2231180, 2231223, 2231226, 2231229, 2231530, 2231595, 2232722, 2232769, 2232796, 2234137, 2234872, 2235446, 2235574, 2235614, 2235634, 2235635, 2235674, 2235781, 2235976, 2236084, 2236101, 2236166, 2236409, 2236442, 2236471, 2236480, 2236586, 2237214, 2237720, 2238027, 2238038, 2238168, 2238284, 2238308, 2238684, 2239002, 2239152, 2239435, 2239449, 2239514, 2239604, 2239624, 2239634, 2239929, 2240050, 2240059, 2240062, 2240124, 2240177, 2240583, 2241219, 2241291, 2241682, 2241817, 2241859, 2241904, 2241978, 2242101, 2242208, 2242364, 2242736, 2243219, 2243223, 2243324, 2243611, 2243683, 2243752, 2243788, 2244119, 2244122, 2244148, 2244858, 2244860, 2244862, 2245234, 2245496, 2246137, 2248247, 2248475, 2248841, 2250874, 2256232, 2256241, 2257869, 2261264, 2267177, 2267331, 2269294, 2270072, 2271165, 2274088, 2276275, 2276556, 2276959, 2277056, 2277330, 2277450, 2277464, 2277632, 2278431, 2278934, 2279185, 2279487, 2280657, 2280747, 2280950, 2281070, 2282314, 2285074, 2286327, 2286457, 2286638, 2287001, 2287463, 2287500, 2298439, 2298739, 2299772, 2303033, 2311833, 2319955, 2324065, 2326786, 2329402, 2332320) --Exited students
   ORDER BY
+    tInstruction.InstructionID,
+    tGoal.goalID,
     tProgress.ProgressDate
 "
 )
@@ -481,7 +532,10 @@ library(tidytext)
 
 #Create table from https://www.cde.state.co.us/coloradoliteracy/advisorylistofinstructionalprogramming2020#intervention
 
-interventionWords <- c('orton', 'og', #imse and Yoshimoto are paired with OG
+interventionWords <- c(
+  # 'orton', 
+                       'og', #imse and Yoshimoto are paired with OG
+                       'orton|kilpatrick',
                        'lexia', # core 5 is paired with lexia in all exited instances
                        'burst', 
                        '95', 
@@ -491,35 +545,42 @@ interventionWords <- c('orton', 'og', #imse and Yoshimoto are paired with OG
                        'hmh', 'into reading', 
                        'heggerty', 
                        'lli:', 'leveled literacy',
-                       'ckla',
-                       '^(.*)open court',
-                       '^(.*)bridge the gap', 
+                       'amplify|ckla',
+                       'open court',
+                       'bridge the gap', 
                        'mindplay',
                        'wonderworks',
-                       'blast', '^(.*)really great', #blast is paired with really great
+                       'blast', 'really great', #blast is paired with really great
                        'countdown', # countdown is paired with really great
-                       'hd', '^(.*)hd word', #hd is paired with high dosage tutoring and really great and hd word
-                       'naturally', '^(.*)read natually', '^(.*)read live',
+                       'hd', 'hd word', #hd is paired with high dosage tutoring and really great and hd word
+                       'naturally', 'read natually', 'read live',
                        'kilptrick',
-                       '^(.*)reading corps', 'americorps', 
+                       'reading corps', 'americorps', 
                        'wilson', 'fundations',
                        'voyager',
                        'ufli',
-                       '^(.*)valley speech', 
+                       'valley speech', 
                        'icali', 'cali', 
-                       '^(.*)el education',
+                       'el education',
                        'wonders',
                        'boost',
-                       '^(.*)six minute', '^(.*)six-minute',
+                       'six minute', 'six-minute',
                        'spire',
                        'spot on', 
                        'ixl', 
-                       'raz',
-                       'amplify')
+                       'raz'
+                       # ,
+                       # 'amplify'
+                       )
 
-instructionInventions <- qrystudentPlan %>% 
+interventionWordsCsv<- read_csv('G:/Shared drives/Research & Assessment Design (RAD)/L1 Projects/3rd Grade Reading/Scan/READActApprovedResources.csv') %>% 
+  filter(!is.na(regex))
+
+regexString <- interventionWordsCsv$regex
+
+instructionalInterventions <- qrystudentPlan %>% 
   clean_names('lower_camel') %>% 
-  # select(personId, instructionDescription, instructionId) %>%
+  select(personId, instructionDescription, instructionId) %>%
   # filter(personId == 1453134) %>%
   mutate(
     intervention = instructionDescription %>%
@@ -527,39 +588,97 @@ instructionInventions <- qrystudentPlan %>%
       str_squish() %>% #remove whitespace
       str_extract_all(
         str_c(
-          interventionWords
+          regexString
           , collapse = "|")
         )
     ) %>% 
   unnest_longer(intervention, keep_empty = TRUE) %>% 
-  # filter(!is.na(intervention)) %>%
-  mutate(interventionSimple = case_when(
-    str_detect(intervention, 'really great') ~ 'really great', 
-    str_detect(intervention, 'i-ready') ~ 'iready',
-    str_detect(intervention, 'i-station') | 
-      str_detect(intervention, 'station') ~ 'istation',
-    str_detect(intervention, 'open court') ~ 'open court',
-    str_detect(intervention, 'into reading') ~ 'into reading',
-    str_detect(intervention, 'bridge the gap') ~ 'bridge the gap', 
-    str_detect(intervention, 'hd word') ~ 'hd', 
-    str_detect(intervention, 'naturally') | 
-      str_detect(intervention, 'read live') | 
-      str_detect(intervention, 'read natually') ~ 'read natually', 
-    str_detect(intervention, 'reading corps') ~'reading corps', 
-    str_detect(intervention, 'valley speech') ~ 'valley speech', 
-    str_detect(intervention, 'cali') | 
-      str_detect(intervention, 'icali') ~ 'icali', 
-    str_detect(intervention, 'spot on') ~ 'spot on', 
-    str_detect(intervention, 'six minute') | 
-      str_detect(intervention, 'six-minute') ~ 'six minute',
-    str_detect(intervention, 'orton') | 
-      str_detect(intervention, 'og') ~ 'og',
-    str_detect(intervention, 'lli:') | 
-      str_detect(intervention, 'leveled literacy') ~ 'leveled literacy Intervention',
-    is.na(intervention) ~ 'no cde approved instruction',
-    TRUE ~ intervention
-)) %>% 
-  distinct(personId, instructionId, instructionTypeName, smartGoal, .keep_all = T) %>% 
+  full_join(interventionWordsCsv, 
+            join_by(intervention == regex), 
+            relationship = "many-to-many")
+#   mutate(interventionSimple = case_when(
+#     is.na(intervention) ~ 'no resource identified',
+#     str_detect(intervention, 'six minute') | 
+#       str_detect(intervention, 'six-minute') |
+#       str_detect(intervention, '6 minute') ~ 'six minute',
+#     str_detect(intervention, '95') |
+#       str_detect(intervention, '95 rap')|
+#       str_detect(intervention, 'phonics intervention program')|
+#       str_detect(intervention, 'phonological awareness intervention program')|
+#       str_detect(intervention, 'vocabulary surge') |
+#       str_detect(intervention, 'unleashing')|
+#       str_detect(intervention, 'phonics chip') ~ '95% Group',
+#     str_detect(intervention, 'heggerty')|
+#       str_detect(intervention, 'haggerty')|
+#       str_detect(intervention, 'haggarty') ~ 'heggerty',
+#     str_detect(intervention, 'hmh') |
+#       str_detect(intervention, 'into reading')|
+#       str_detect(intervention, 'houghton mifflin') ~ 'hmh',
+#     str_detect(intervention, 'really great') ~ 'really great reading', 
+#     str_detect(intervention, 'i-ready') ~ 'iready',
+#     str_detect(intervention, 'i-station') | 
+#       str_detect(intervention, 'station') ~ 'istation',
+#     str_detect(intervention, 'open court') ~ 'open court',
+#     str_detect(intervention, 'into reading') ~ 'into reading',
+#     str_detect(intervention, 'bridge the gap') ~ 'bridge the gap', 
+#     str_detect(intervention, 'hd word') ~ 'hd', 
+#     str_detect(intervention, 'el education')|
+#       str_detect(intervention, 'late partial alphabetic, microphase') ~'el education',
+#     str_detect(intervention, 'naturally') | 
+#       str_detect(intervention, 'read live') | 
+#       str_detect(intervention, 'read natually') ~ 'read natually', 
+#     str_detect(intervention, 'reading corps') ~'reading corps', 
+#     str_detect(intervention, 'valley speech') ~ 'valley speech', 
+#     str_detect(intervention, 'cali') | 
+#       str_detect(intervention, 'icali') ~ 'icali', 
+#     str_detect(intervention, 'spot on') ~ 'spot on', 
+#     str_detect(intervention, 'orton') | 
+#       str_detect(intervention, 'og')|
+#       str_detect(intervention, 'o\\.g\\.') ~ 'og',
+#     str_detect(intervention, 'lli:') | 
+#       str_detect(intervention, 'leveled literacy') ~ 'leveled literacy Intervention',
+# 
+#     TRUE ~ intervention
+# )) %>% 
+  distinct(personId, instructionId, instructionTypeName,intervention, smartGoal, .keep_all = T) %>% 
   ungroup() %>% 
-  select(firstName, lastName, personId, instructionId, intervention, 
-            interventionSimple, instructionTypeName)
+  group_by(interventionSimple, instructionTypeName) %>% #firstName, lastName, personId, instructionId, intervention, instructionTypeName
+  summarise(n = n()) %>% 
+  filter(instructionTypeName != 'Core') %>% 
+  arrange(instructionTypeName, desc(n))
+  
+  
+  # Parent Acknowledgement ----
+  ## Query of students with parent acknowledgement of READ Plan ----
+  qryPlanAcknowledge <- odbc::dbGetQuery(con,
+ "
+SELECT
+  StudentNeedID
+  ,PersonID
+  ,CurrentStatusCode
+  ,StatusDate
+  ,AcknowledgeDate
+  ,CreatedDate
+  ,IsOpen
+FROM
+  dbSoars.rti.vCurrentNeedStatus (NOLOCK)
+WHERE
+  NeedTypeID = 7
+")
+
+  planAcknowledge <- qryPlanAcknowledge %>% 
+    clean_names('lower_camel') %>% 
+    filter(personId %in% NoPlanEnd | personId %in% planEnd) %>% 
+    mutate(acknowledgedPlan = case_when(
+      is.na(acknowledgeDate) ~ 0, 
+      TRUE ~ 1
+    )) %>% 
+    group_by(isOpen) %>% 
+    mutate(n = n()) %>% 
+    group_by(isOpen, acknowledgedPlan) %>% 
+    mutate(acknowN = n(), 
+           acknowPct = acknowN/n) %>% 
+    group_by(currentStatusCode, acknowledgedPlan) %>% 
+    reframe(n = first(n), 
+            acknowN = first(acknowN), 
+            acknowPct = first(acknowPct))
