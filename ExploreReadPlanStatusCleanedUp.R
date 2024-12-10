@@ -221,6 +221,8 @@ flagStart <- qryFlags %>%
   # filter(personID == 2269294) 
   # distinct(personID, Grade, planStart, .keep_all = T)
 
+saveRDS(flagStart, 'data/flagStart.rds')
+
 ## Transform data into long format to add in summarizing ----
 flagLonger <- flagStart %>% 
   select(personID, Grade, planStart, planEnd) %>% 
@@ -578,13 +580,14 @@ cmasPerformance <- qryCmas %>%
          !is.na(proficiencyLongDescription)) %>% 
   select(personId, grade, cmasProfLevel = proficiencyLongDescription, testName)
 
+# saveRDS(cmasPerformance, 'data/cmasPerformance.rds')
 cmasWithRead <- cmasPerformance %>% 
   right_join(flagWider, join_by(personId == personID)) %>% 
   mutate(n = n_distinct(personId)) %>% 
   group_by(cmasProfLevel) %>% 
   mutate(profN = n(), 
          profPct = profN/n) 
-  
+# saveRDS(cmasWithRead, 'data.cmasWithRead.rds')  
 ### Explore the CMAS performance levels of students from cohort alongside their READ Plan info ----
 #### Plot summary of CMAS performance for exited students ----
 flagGrade3 <- flagStart %>% 
@@ -647,7 +650,72 @@ ggplot(data = grade3ExitedCMAS,
         legend.title = element_blank(), 
         panel.grid =  element_blank())
 
-library(legendry)
+
+### Explore the CMAS performance levels of students from cohort alongside their READ Plan info ----
+#### Plot summary of CMAS performance for exited students ----
+flagGrade3 <- flagLonger %>% 
+  distinct(personID, value) %>% 
+  filter(str_detect(value, 'Exit')) %>% 
+  select(personID, planEnd = value)
+
+grade3ExitedCMAS <- flagGrade3 %>% 
+  ungroup() %>% 
+  left_join(cmasPerformance, join_by(personID == personId)) %>% 
+  filter(!is.na(cmasProfLevel)) %>% 
+  distinct(personID, cmasProfLevel, .keep_all = T) %>% 
+  mutate(totalN = n()) %>% 
+  group_by(planEnd) %>% 
+  mutate(planN = n()) %>% 
+  group_by(cmasProfLevel, planEnd) %>% 
+  reframe(groupN = n(), 
+          planN = first(planN),
+          totalN = first(totalN),
+          groupPct = round(groupN/planN,4)) %>% 
+  mutate(cmasProfLevel = str_remove(cmasProfLevel, ' Expectations')) %>% 
+  mutate(cmasProfLevel = factor(cmasProfLevel, 
+                                levels= c('Exceeded', 
+                                          'Met', 
+                                          'Approached', 
+                                          'Partially Met', 
+                                          'Did Not Yet Meet'))) %>% 
+  mutate(planEnd = factor(planEnd, 
+                          levels = c("K- Exit plan", 
+                                     "1- Exit plan", 
+                                     "2- Exit plan", 
+                                     "3- Exit plan")
+  )
+  )
+
+ggplot(data = grade3ExitedCMAS, 
+       mapping = aes(x = totalN, 
+                     y = groupPct, 
+                     fill = cmasProfLevel))+
+  geom_bar(stat= 'identity', 
+           position = 'stack', 
+           alpha = 0.8) +
+  geom_label(aes(label = paste0(groupN, '-', scales::percent(groupPct, 1))), 
+             position = position_stack(vjust = 0.5), 
+             size = 4,
+             show.legend = F
+  ) +
+  scale_fill_manual(values = c(
+    'Exceeded' = '#317bb4', 
+    'Met'= '#1b8367', 
+    'Approached' = '#e2a331', 
+    'Partially Met' = '#e57a3c', 
+    'Did Not Yet Meet'= '#d8274a'
+  )) +
+  facet_wrap(~planEnd, ncol = 4) +
+  labs(title = 'CMAS Performace', 
+       subtitle = 'Grade 3 in 2024') +
+  theme_minimal() +
+  theme(axis.title = element_blank(), 
+        axis.text = element_blank(), 
+        legend.position = 'top', 
+        legend.title = element_blank(), 
+        panel.grid =  element_blank())
+
+
 # Correlation between plan Exit in grade 3 and CMAS proficiency ----
 flagGrade3Cor <- flagStart %>% 
   filter(gradeInt == 3, 
