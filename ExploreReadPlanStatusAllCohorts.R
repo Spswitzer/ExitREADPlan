@@ -1366,6 +1366,58 @@ ggplot(data = allYears,
   )
 
 
+allYearsBubbleGrade <- allYears %>% 
+  mutate(gradeInYear = case_when(
+    planStart == 'Kindergarten' & endYear == '2023-2024' ~ 'Grade level in 2020-2021', 
+    planStart == '1st Grade' & endYear == '2022-2023' ~ 'Grade level in 2020-2021',
+    planStart == '2nd Grade' & endYear == '2021-2022' ~ 'Grade level in 2020-2021',
+    planStart == '3rd Grade' & endYear == '2020-2021' ~ 'Grade level in 2020-2021',
+    TRUE ~ 'Other Cohort Years'
+  )) %>% 
+  mutate(gradeInYear = factor(gradeInYear, 
+                              levels = c('Grade level in 2020-2021', 'Other Cohort Years'
+                                         ))) %>% 
+  mutate(planStart = factor(planStart, 
+                            levels = c('Kindergarten', 
+                                       '1st Grade', 
+                                       '2nd Grade', 
+                                       '3rd Grade'), 
+                            labels = c('Kindergarten', 
+                                       'Grade 1', 
+                                       'Grade 2', 
+                                       'Grade 3')))
+
+ggplot(data = allYearsBubbleGrade, 
+       mapping = aes(x = planStart, 
+                     y = planStartN,
+                     group = endYear)) +
+  geom_line(show.legend = F, 
+            color = 'lightgrey') +
+  geom_point(size = 5, 
+             mapping = aes(
+                           color = gradeInYear)) +
+  geom_label(data = filter(allYearsBubbleGrade, gradeInYear==
+                           'Grade level in 2020-2021'),
+               aes(label = paste0(planStartN), 
+                   color = gradeInYear), 
+             show.legend = F, 
+             size = 4, 
+             hjust = 1.25
+  ) +
+  scale_color_manual(values = c(  '#1b8367', 'grey'))+
+  labs(title = 'Number of students starting READ Plan')+
+  theme_minimal() %>% 
+  theme(axis.title = element_blank(), 
+        axis.text.y = element_blank(), 
+        axis.text.x = element_text(size = 14), 
+        axis.ticks = element_blank(),
+        panel.grid = element_blank(), 
+        legend.key = element_rect(fill = "white"),
+        legend.position = 'top', 
+        legend.text = element_text(size = 12),
+        legend.title = element_blank()
+  )
+
 #Plan End Plot ----
 
 data24End <- cohort24$flagSummary %>% 

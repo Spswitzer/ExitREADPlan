@@ -682,7 +682,11 @@ grade3ExitedCMAS <- flagGrade3 %>%
                           levels = c("K- Exit plan", 
                                      "1- Exit plan", 
                                      "2- Exit plan", 
-                                     "3- Exit plan")
+                                     "3- Exit plan"), 
+                          labels = c("Kindergarten", 
+                                     "Grade 1", 
+                                     "Grade 2", 
+                                     "Grade 3")
   )
   )
 
@@ -705,15 +709,18 @@ ggplot(data = grade3ExitedCMAS,
     'Partially Met' = '#e57a3c', 
     'Did Not Yet Meet'= '#d8274a'
   )) +
-  facet_wrap(~planEnd, ncol = 4) +
-  labs(title = 'CMAS Performace', 
-       subtitle = 'Grade 3 in 2024') +
+  facet_wrap(~planEnd, 
+             ncol = 4, 
+             strip.position = "bottom",) +
+  # labs(title = 'CMAS Performace', 
+  #      subtitle = 'Grade 3 in 2024') +
   theme_minimal() +
   theme(axis.title = element_blank(), 
         axis.text = element_blank(), 
         legend.position = 'top', 
         legend.title = element_blank(), 
-        panel.grid =  element_blank())
+        panel.grid =  element_blank(), 
+        strip.text = element_text(size = 14))
 
 
 # Correlation between plan Exit in grade 3 and CMAS proficiency ----

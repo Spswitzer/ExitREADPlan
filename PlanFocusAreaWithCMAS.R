@@ -33,28 +33,31 @@ grade3PlanEndStatus <- flagGrade3 %>%
   group_by(cmasProfLevel, planEnd) %>% 
   filter(cmasProfLevel %in% c('Met Expectations', 'Exceeded Expectations')) %>% 
   ungroup() %>% 
-  distinct(personId = personID, planEnd)
+  distinct(personId = personID, planEnd) %>% 
+  mutate(planEnd = ifelse(is.na(planEnd), 'on plan', planEnd))
 
 planFocusAreas <-  qrystudentFocusAreas %>% 
   clean_names('lower_camel') %>% 
   right_join(grade3PlanEndStatus) %>% 
   select(studentNeedId, firstName, lastName, personId, 
-         focusAreaName, focusAreaId, focusStartDate = startDate) %>% 
+         focusAreaName, focusAreaId, focusStartDate = startDate, planEnd) %>% 
   mutate(focusStartDate =  as.Date(focusStartDate, "%d/%m/%Y"),
          N = n_distinct(personId)) %>% 
   mutate(goalYear = year(focusStartDate)) %>% 
   arrange(personId, desc(focusStartDate)) %>% 
-  group_by(personId) %>% 
+  group_by(personId, planEnd) %>% 
   reframe(focusStartDate = max(focusStartDate), 
           focusAreaName = first(focusAreaName), 
           focusAreaId = first(focusAreaId), 
           N = first(N)) %>%
   arrange(personId, focusAreaId, focusStartDate) %>% 
-  group_by(personId, focusAreaId, focusAreaName, N) %>% 
+  group_by(personId, focusAreaId, focusAreaName, N, planEnd) %>% 
   summarise(focusAreaName = first(focusAreaName)) %>% 
   group_by(personId,  focusAreaName, N) %>% 
-  group_by(focusAreaName, N) %>% 
+  group_by(planEnd) %>% 
+  mutate(planN = n()) %>% 
+  group_by(focusAreaName, N, planEnd, planN) %>% 
   reframe(focusAreaCount = n()) %>% 
-  mutate(focusAreaCountPct = round(focusAreaCount/N, 2)) %>% 
-  arrange(desc(focusAreaCountPct))
+  mutate(focusAreaCountPct = round(focusAreaCount/planN, 2)) %>% 
+  arrange(focusAreaName, planEnd)
 
