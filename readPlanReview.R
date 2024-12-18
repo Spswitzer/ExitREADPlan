@@ -21,7 +21,7 @@ planEnd <- flagStart %>%
   filter(planEnd %in% c( 'K- Exit plan','3- Exit plan', '2- Exit plan', '1- Exit plan')) %>% 
   pull(personID)
 
-toString(planEnd)
+# toString(planEnd)
 
 
 planEndGrade3<- flagStart %>% 
@@ -43,11 +43,8 @@ grade3Cmas <- flagGrade3 %>%
   left_join(cmasPerformance, join_by(personID == personId)) %>% 
   filter(!is.na(cmasProfLevel)) %>%
   # filter(testName == 	'CMAS ELA Grade 03 2023-24') %>%
-  filter(cmasProfLevel %in% c('Exceeded Expectations', 'Met Expectations')) %>%
+  # filter(cmasProfLevel %in% c('Exceeded Expectations', 'Met Expectations')) %>%
   distinct(personID, cmasProfLevel, .keep_all = T) %>%
-  mutate(totalN = n()) %>% 
-  group_by(planEnd) %>% 
-  mutate(planN = n()) %>% 
   mutate(cmasProfLevel = str_remove(cmasProfLevel, ' Expectations')) %>% 
   mutate(cmasProfLevel = factor(cmasProfLevel, 
                                 levels= c('Exceeded', 
@@ -56,15 +53,33 @@ grade3Cmas <- flagGrade3 %>%
                                           'Partially Met', 
                                           'Did Not Yet Meet'))) %>% 
   mutate(planEnd = case_when(
-    is.na(planEnd) ~ 'on READ Plan', 
-    TRUE ~ 'Exited READ plan in Grade 3'
-  ))
+    is.na(planEnd) ~ 0, 
+    TRUE ~ 1
+  )) %>% 
+  mutate(pl = case_when(
+    cmasProfLevel %in% c('Exceeded', 'Met') ~ 1, 
+    TRUE ~ 0
+  )) %>% 
+  mutate(totalN = n()) %>% 
+  group_by(planEnd) %>% 
+  mutate(planN = n()) %>% 
+  group_by(planEnd, pl) %>% 
+  mutate(plN = n()) %>% 
+  mutate(studentGroup = case_when(
+    planEnd == 0 & pl == 0 ~ 'Plan DNM', 
+    planEnd == 0 & pl == 1 ~ 'Plan ME', 
+    planEnd == 1 & pl == 0 ~ 'Exit DNM', 
+    planEnd == 1 & pl == 1 ~ 'Exit ME', 
+    TRUE ~ 'Error'
+  )) %>% 
+  ungroup() %>% 
+  select(personID, studentGroup)
 
 exitCmasMeetExceed <- grade3Cmas %>% 
   filter(planEnd == 'Exited READ plan in Grade 3') %>% 
   pull(personID)
 
-toString(exitCmasMeetExceed)
+# toString(exitCmasMeetExceed)
 ## Students Still on Plan ----
 NoPlanEnd <- flagStart %>% 
   select(personID, planStart, planEnd) %>% 
@@ -79,7 +94,7 @@ NoPlanEnd <- flagStart %>%
   filter(is.na(planEnd)) %>% 
   pull(personID)
 
-toString(NoPlanEnd)
+# toString(NoPlanEnd)
 
 
 ## Students Still on Plan with CMAS M/E ----
@@ -87,7 +102,7 @@ noExitCmas <- grade3Cmas %>%
   filter(planEnd == 'on READ Plan') %>% 
   pull(personID)
 
-toString(noExitCmas)
+# toString(noExitCmas)
 
 # connect to SQL database ----
 con <- dbConnect(odbc(),
@@ -219,7 +234,7 @@ gt(planFocusAreas) %>%
     table.font.size = 12
   ) 
 
-## Explore students with no goal focus area ----
+### Explore students with no goal focus area ----
 planAndFlag <- data.frame(personID = unique(qrystudentFocusAreas$PersonID)) %>% 
   mutate(plan = 'Y')
 
@@ -231,7 +246,7 @@ noPlanYesFlag <- planAndFlag %>%
  full_join(planFlag, join_by(personID == personID)) %>% 
   filter(is.na(plan))
 
-## Grouped by exit year ----
+#### Grouped by exit year ----
 planFocusAreasPlanEndGrade <- qrystudentFocusAreas %>% 
   clean_names('lower_camel') %>% 
   filter(personId %in% NoPlanEnd) %>%
@@ -280,7 +295,7 @@ gt(planFocusAreasPlanEndGrade) %>%
     table.font.size = 12
   ) 
 
-## Grouped by plan year Revised Approach----
+#### Grouped by plan year Revised Approach----
 planFocusAreasPlanYear <- qrystudentFocusAreas %>% 
   clean_names('lower_camel') %>% 
   filter(personId %in% NoPlanEnd) %>%
@@ -341,7 +356,7 @@ gt(planFocusAreasPlanYear) %>%
     table.font.size = 12
   ) 
 
-## Summarize focus areas ----
+##### Summarize focus areas ----
 instructionPm <- qrystudentFocusAreas %>% 
   clean_names('lower_camel') %>% 
   filter(personId %in% NoPlanEnd) %>%
@@ -417,14 +432,18 @@ WHERE
     tStudentNeed.ConcernStartDate
 "
 )
-
+# Access Frequency Duration and Intensity ----
 ## Clean Plan Function ----
-cleanStudentPlans <- function(.group) {
+cleanStudentPlans <- function(stuGroup) {
 
+  personIds <- grade3Cmas %>% 
+    filter(studentGroup == stuGroup) %>% 
+    pull(personID)
+  
   #Goal Volume, Frequency, Intensity, Duration ----
   cleanPlans <- qrystudentPlan %>% 
     clean_names('lower_camel') %>% 
-    filter(personId %in% .group) %>% 
+    filter(personId %in% personIds) %>% 
     mutate(implementedDate = ymd(as_date(implementedDate)),
            completedDate = ymd(as_date(completedDate))
     ) %>% 
@@ -444,7 +463,11 @@ cleanStudentPlans <- function(.group) {
     group_by(instructionTypeName, implementerRoleName, instructionFrequencyTypeName) %>% 
     summarise(minutesMean = first(minutesMean), 
               freqMean = first(freqMean), 
-              roleN = first(roleN))
+              roleN = first(roleN)) %>% 
+    filter(instructionTypeName != 'Core', 
+           instructionFrequencyTypeName == 'Week') %>% 
+    mutate(studentGroup = stuGroup) %>% 
+    arrange(instructionTypeName, desc(roleN))
   
   feqIntDur <- cleanPlans %>% 
     mutate(instructionN = n_distinct(personId)) %>% 
@@ -454,7 +477,11 @@ cleanStudentPlans <- function(.group) {
     summarise(instTypeN = first(instTypeN),
               instIntensityN = n(),
               minutesMean = round(mean(instructionMinutes, na.rm = T), 1), 
-              freqMean = round(mean(numberOfTimes, na.rm = T), 1))
+              freqMean = round(mean(numberOfTimes, na.rm = T), 1)) %>% 
+    filter(instructionTypeName != 'Core', 
+           instructionFrequencyTypeName == 'Week') %>% 
+    mutate(studentGroup = stuGroup) %>% 
+    arrange(instructionTypeName, desc(instIntensityN ))
   
   
   ## Explore students with no instructional plan ----
@@ -470,27 +497,434 @@ cleanStudentPlans <- function(.group) {
               instructionAndFlag = instructionAndFlag))
 }
 
-instructionPlanEnd <- cleanStudentPlans(.group = planEnd)
-instructionPlanEndME <- cleanStudentPlans(.group = exitCmasMeetExceed)
-instructionPlanNoEnd <- cleanStudentPlans(.group = NoPlanEnd)
-instructionPlanNoEndME <- cleanStudentPlans(.group = noExitCmas)
+## create groups ----
+studentGroups <- unique(grade3Cmas$studentGroup)
 
-instructionPlanEndIi <-  instructionPlanEnd$instructionInteractions
-instructionPlanEndFdi <-  instructionPlanEnd$feqIntDur
-instructionPlanEndN <- instructionPlanEnd$instructionAndFlag
+# cleanStudentPlans(stuGroup = 'Exit ME')
 
-instructionPlanEndMEIi <- instructionPlanEndME$instructionInteractions
-instructionPlanEndMEFdi <- instructionPlanEndME$feqIntDur
-instructionPlanEndMEN <- instructionPlanEndME$instructionAndFlag
+## Map groups through function ----
+allResults <- map(.x = studentGroups, .f = cleanStudentPlans)
 
-instructionPlanNoEndIi <- instructionPlanNoEnd$instructionInteractions
-instructionPlanNoEndFdi <- instructionPlanNoEnd$feqIntDur
-instructionPlanNoEndN <- instructionPlanNoEnd$instructionAndFlag
+### Access N of service providers for each type of instructional service ----
+instructionalInteractions <- allResults[[1]]$instructionInteractions %>% 
+  bind_rows(allResults[[2]]$instructionInteractions) %>% 
+  bind_rows(allResults[[3]]$instructionInteractions) %>% 
+  bind_rows(allResults[[4]]$instructionInteractions) %>% 
+  select(implementerRoleName, instructionTypeName, studentGroup, roleN) %>% 
+  group_by(studentGroup, instructionTypeName) %>% 
+  # top_n(3) %>% 
+  mutate(studentGroup = factor(studentGroup, 
+                               levels = c('Exit ME', 
+                                          'Exit DNM', 
+                                          'Plan ME', 
+                                          'Plan DNM'), 
+                               labels = c(c('Exit Read Plan In Grade 3 and CMAS Meet/Exceed', 
+                                            'Exit Read Plan In Grade 3 and CMAS Did Not Meet/Exceed', 
+                                            'Did not Exit Plan and CMAS Meet/Exceed', 
+                                            'Did not Exit Plan and CMAS Did Not Meet/Exceed'))))
 
-instructionPlanNoEndMEIi <- instructionPlanNoEndME$instructionInteractions
-instructionPlanNoEndMEFdi <- instructionPlanNoEndME$FeqIntDur
-instructionPlanNoEndMEN <- instructionPlanNoEndME$instructionAndFlag
-# 
+### Access frequency and duration of each type of instructional service ----
+freqDuration <- allResults[[1]][["feqIntDur"]] %>% 
+  bind_rows(allResults[[2]][["feqIntDur"]]) %>% 
+  bind_rows(allResults[[3]][["feqIntDur"]]) %>% 
+  bind_rows(allResults[[4]][["feqIntDur"]]) %>% 
+  mutate(studentGroup = factor(studentGroup, 
+                               levels = c('Exit ME', 
+                                          'Exit DNM', 
+                                          'Plan ME', 
+                                          'Plan DNM'), 
+                               labels = c(c('Exit Read Plan In Grade 3 and CMAS Meet/Exceed', 
+                                            'Exit Read Plan In Grade 3 and CMAS Did Not Meet/Exceed', 
+                                            'Did not Exit Plan and CMAS Meet/Exceed', 
+                                            'Did not Exit Plan and CMAS Did Not Meet/Exceed')))) %>% 
+  group_by(studentGroup)
+  
+### Access N of students with CMAS score and documented instructional services ----
+allResults[[1]]$instructionAndFlag
+allResults[[2]]$instructionAndFlag
+allResults[[3]]$instructionAndFlag 
+allResults[[4]]$instructionAndFlag
+
+library(gt)
+
+#### Table for N of service providers for each type of instructional service ----
+gt(instructionalInteractions) %>% 
+  cols_label(implementerRoleName = 'Implementer Role', 
+             roleN = 'Count') %>% 
+  fmt_number(roleN, decimals = 0) %>% 
+  tab_header(title = 'N of service providers for weekly services') %>% 
+  cols_align(
+    align = c("left"),
+    columns = implementerRoleName
+  ) %>% 
+  cols_align(
+    align = c("center"),
+    columns = roleN
+  ) %>% 
+  opt_table_outline() %>% 
+  tab_style(
+    cell_fill('grey'), 
+    cells_row_groups()
+  ) %>% 
+  tab_options(
+    table.font.size = 12
+  )
+
+#### Table for frequency and duration of each type of instructional service ----
+gt(freqDuration) %>% 
+  cols_label(instructionTypeName = 'Type of Instruction', 
+             minutesMean = 'Mean of Minutes', 
+             freqMean = 'Mean of service frequency') %>% 
+  cols_hide(c(instructionFrequencyTypeName, instTypeN, instIntensityN)) %>% 
+  tab_header(title = 'Means for weekly services') %>% 
+  cols_align(
+    align = c("left"),
+    columns = instructionTypeName
+  ) %>% 
+  cols_align(
+    align = c("center"),
+    columns = c(minutesMean, freqMean)
+  ) %>% 
+  opt_table_outline() %>% 
+  tab_style(
+    cell_fill('grey'), 
+    cells_row_groups()
+  ) %>% 
+  tab_options(
+    table.font.size = 12
+  )
+
+# Access the names of the resources for intervention ----
+## Access Lookup table with the names of the resources and the names collapsed ----
+interventionWordsCsv<- read_csv('G:/Shared drives/Research & Assessment Design (RAD)/L1 Projects/3rd Grade Reading/B  Scan/READActApprovedResources.csv', 
+                                col_select = c('regex', 'collapsed') )%>% 
+  filter(!is.na(regex)) %>% 
+  clean_names('lower_camel') 
+
+regexString <- interventionWordsCsv$regex
+
+### Compare the CDE approved resources to those found the Jeffco data set
+instructionalInterventions <- qrystudentPlan %>% 
+  clean_names('lower_camel') %>% 
+  filter(instructionTypeName != 'Core') %>% 
+  filter(personId %in% c(exitCmasMeetExceed, noExitCmas, NoPlanEnd, planEnd)) %>% 
+  select(personId, instructionDescription, instructionId) %>%
+  mutate(
+    intervention = instructionDescription %>%
+      str_to_lower() %>%
+      str_squish() %>% #remove whitespace
+      str_extract_all(
+        str_c(
+          regexString
+          , collapse = "|")
+        )
+    ) %>% 
+  unnest_longer(intervention, keep_empty = TRUE) %>% 
+  left_join(interventionWordsCsv, 
+            join_by(intervention == regex), 
+            relationship = "many-to-many")
+
+instructionInfo <- function(stuGroup) {
+ 
+   personIds <- grade3Cmas %>% 
+    filter(studentGroup == stuGroup) %>% 
+    pull(personID)
+  
+  instructInter <- instructionalInterventions %>% 
+    mutate(collapsed = case_when(
+      intervention == 'lli' ~ 'LLI', 
+      intervention == 'o.g.' ~ 'Orton Gillingham',
+      intervention == 'og ' ~ 'Orton Gillingham',
+      is.na(intervention) ~ 'No resource Identified',
+      TRUE ~ collapsed
+    )) %>% 
+    filter(personId %in% personIds) %>% 
+    distinct(personId, 
+             instructionId,
+             intervention, 
+             collapsed,
+             instructionDescription,
+             .keep_all = T) %>% 
+    ungroup() %>% 
+    group_by(collapsed) %>% #firstName, lastName, personId, instructionId, intervention, instructionTypeName
+    summarise(n = n()) %>% 
+    arrange(desc(n)) %>% 
+    head(5) %>% 
+    mutate(studentGroup = stuGroup)
+}
+
+studentGroups <- unique(grade3Cmas$studentGroup)
+
+## Map groups through function ----
+interventionResults <- map(.x = studentGroups, .f = instructionInfo) %>% 
+  bind_rows() %>%
+  mutate(studentGroup = factor(studentGroup, 
+                               levels = c('Exit ME', 
+                                          'Exit DNM', 
+                                          'Plan ME', 
+                                          'Plan DNM'), 
+                               labels = c(c('Exit Read Plan In Grade 3 and CMAS Meet/Exceed', 
+                                            'Exit Read Plan In Grade 3 and CMAS Did Not Meet/Exceed', 
+                                            'Did not Exit Plan and CMAS Meet/Exceed', 
+                                            'Did not Exit Plan and CMAS Did Not Meet/Exceed')))) %>% 
+  group_by(studentGroup)
+
+gt(interventionResults) %>% 
+  cols_label(collapsed = 'Resource Cited', 
+             n = 'Count of Instances') %>% 
+  fmt_number(columns = n, 
+             decimals = 0) %>% 
+  tab_header(title = 'Counts of Instances resources were used') %>% 
+  cols_align(
+    align = c("left"),
+    columns = collapsed
+  ) %>% 
+  cols_align(
+    align = c("center"),
+    columns = n
+  ) %>% 
+  opt_table_outline() %>% 
+  tab_style(
+    cell_fill('grey'), 
+    cells_row_groups()
+  ) %>% 
+  tab_options(
+    table.font.size = 12
+  )
+
+
+  
+  # Parent Acknowledgement ----
+  ## Query of students with parent acknowledgement of READ Plan ----
+  qryPlanAcknowledge <- odbc::dbGetQuery(con,
+ "
+SELECT
+  StudentNeedID
+  ,PersonID
+  ,CurrentStatusCode
+  ,StatusDate
+  ,AcknowledgeDate
+  ,CreatedDate
+  ,IsOpen
+FROM
+  dbSoars.rti.vCurrentNeedStatus (NOLOCK)
+WHERE
+  NeedTypeID = 7
+")
+
+  planAcknowledge <- qryPlanAcknowledge %>% 
+    clean_names('lower_camel') %>% 
+    filter(personId %in% NoPlanEnd | personId %in% planEnd) %>% 
+    mutate(acknowledgedPlan = case_when(
+      is.na(acknowledgeDate) ~ 0, 
+      TRUE ~ 1
+    )) %>% 
+    group_by(isOpen) %>% 
+    mutate(n = n()) %>% 
+    group_by(isOpen, acknowledgedPlan) %>% 
+    mutate(acknowN = n(), 
+           acknowPct = acknowN/n) %>% 
+    group_by(currentStatusCode, acknowledgedPlan) %>% 
+    reframe(n = first(n), 
+            acknowN = first(acknowN), 
+            acknowPct = first(acknowPct))
+
+  
+  
+  # Need Progress Monitoring Result ----
+  qryStudentProgress <- odbc::dbGetQuery(con,
+                                     "
+   SELECT
+    DISTINCT
+     tStudentNeed.studentNeedID
+     ,tStudentNeed.FirstName
+     ,tStudentNeed.LastName
+     ,tStudentNeed.PersonID
+   --  ,tInstruction.ImplementedDate
+   --  ,tInstruction.InstructionID
+   --  ,tInstruction.InstructionDescription
+   --  ,tInstruction.InstructionMinutes
+  --   ,tInstruction.TimesPerWeek
+  --   ,tInstruction.NumberOfTimes
+  --   ,tInstructionFrequencyType.InstructionFrequencyTypeName
+  --   ,tInstruction.InstructionFrequencyTypeID
+  --   ,tInstructionType.InstructionTypeName
+  --   ,tImplementerRole.ImplementerRoleName
+     --,tGoal.ParentAcknowledgeDate
+     ,tGoal.ProgressMonitoring
+    -- ,tProgress.ProgressResultNameID
+     ,tProgress.ProgressDate
+     ,tProgress.LastUpdatedDate AS prgressLastUpdate
+     ,tProgressResult.ProgressValue
+     ,tProgressResult.ProgressResultShortDescription
+     ,tMonitoringFrequencyType.MonitoringFrequencyTypeName
+    ,tGoal.GoalStartDate
+    -- ,tGoal.CreatedDate
+     ,tGoal.GoalEndDate
+    -- ,tGoal.LastUpdatedDate
+     ,tGoal.GoalID
+     ,tGoal.SmartGoal --must be at end of query
+  FROM
+    dbSOARS.rti.tStudentNeed (NOLOCK)
+    JOIN dbSOARS.rti.tStudentNeedFocusArea (NOLOCK) ON
+      tStudentNeedFocusArea.StudentNeedID = tStudentNeed.StudentNeedID
+    JOIN dbSOARS.rti.tGoal (NOLOCK) ON
+      tGoal.StudentNeedID = tStudentNeed.StudentNeedID
+    JOIN dbSOARS.rti.tNeedType (NOLOCK) ON
+     tNeedType.NeedTypeID = tStudentNeed.NeedTypeID
+    JOIN dbSOARS.rti.tFocusArea (NOLOCK) ON
+     tFocusArea.FocusAreaID = tStudentNeedFocusArea.FocusAreaID
+    JOIN dbSOARS.rti.tGoalInstruction (NOLOCK) ON
+      tGoalInstruction.GoalID = tGoal.GoalID
+    JOIN dbSOARS.rti.tGoalFocusArea (NOLOCK) ON
+      tGoalFocusArea.GoalID = tGoal.GoalID AND
+      tGoalFocusArea.GoalID = tGoalInstruction.GoalID
+    JOIN dbSOARS.rti.tProgress(NOLOCK) ON
+     tProgress.GoalID = tGoal.GoalID AND
+    -- tProgress.LastUpdatedByStaffID = tGoal.LastUpdatedByStaffID AND
+     tProgress.GoalID = tGoalInstruction.GoalID
+    JOIN dbSOARS.rti.tProgressResult (NOLOCK) ON
+     tProgressResult.ProgressResultNameID = tProgress.ProgressResultNameID
+    JOIN dbSoArs.rti.tInstruction (NOLOCK) ON
+      tInstruction.InstructionID = tGoalInstruction.InstructionID AND
+       tInstruction.studentNeedID = tStudentNeed.studentNeedID
+    JOIN dbSoars.rti.tFocusAreaDesignator (NOLOCK) ON
+      tFocusAreaDesignator.FocusAreaID =  tStudentNeedFocusArea.FocusAreaID
+    JOIN dbSoars.rti.tDesignator (NOLOCK) ON
+      tDesignator.DesignatorID =  tFocusAreaDesignator.DesignatorID
+    JOIN dbSoars.rti.tImplementerRole (NOLOCK) ON
+      tImplementerRole.ImplementerRoleID = tInstruction.ImplementerRoleID
+    JOIN dbSoars.rti.tInstructionFrequencyType (NOLOCK) ON
+     tInstructionFrequencyType.InstructionFrequencyTypeID = tInstruction.InstructionFrequencyTypeID
+    JOIN dbSoars.rti.tInstructionType (NOLOCK) ON
+      tInstructionType.InstructionTypeID = tInstruction.InstructionTypeID
+    JOIN dbSoars.rti.tMonitoringFrequencyType (NOLOCK) ON
+      tMonitoringFrequencyType.MonitoringFrequencyTypeID = tGoal.MonitoringFrequencyTypeID
+  WHERE
+      tNeedType.NeedTypeName = 'READ'
+    AND
+      tStudentNeed.ActiveFlag = 1
+    AND
+      tStudentNeedFocusArea.ActiveFlag = 1
+    AND
+      tGoal.ActiveFlag = 1
+    AND
+      tNeedType.ActiveFlag = 1
+    AND
+      tFocusArea.ActiveFlag = 1
+    AND
+      tGoalInstruction.ActiveFlag = 1
+    AND
+      tProgress.ActiveFlag = 1
+    AND
+      tProgressResult.ActiveFlag = 1
+    AND
+      tInstruction.ActiveFlag = 1
+    AND
+      tFocusAreaDesignator.ActiveFlag = 1
+    AND
+      tImplementerRole.ActiveFlag = 1
+    AND
+      tInstructionFrequencyType.ActiveFlag = 1
+    AND
+      tInstructionType.ActiveFlag = 1
+    AND
+      tMonitoringFrequencyType.ActiveFlag = 1
+    AND
+      tDesignator.ActiveFlag = 1
+
+    AND
+      tInstruction.ImplementedDate > '2020-08-01'
+    --AND 
+   --   tStudentNeed.PersonID = 1453134
+    ORDER BY
+ --     tInstruction.InstructionID,
+  --    tGoal.goalID,
+      tProgress.ProgressDate
+  "
+  )
+  
+  
+  progressMonitoring <- qryStudentProgress %>% 
+    clean_names('lower_camel') %>% 
+    right_join(grade3Cmas, 
+               join_by(personId == personID), 
+               relationship = 'many-to-one') %>% 
+    mutate(n = n_distinct(personId)) %>% 
+    group_by(personId, goalId) %>% 
+    mutate(goalN = n()) %>% 
+    mutate(progressValue = case_when(
+      progressResultShortDescription == 'Goal Achieved' ~ 2, 
+      TRUE ~ progressValue)) %>% 
+    # mutate(progressDate = ymd(as_date(progressDate))) %>% 
+    arrange(personId, goalId, progressDate) %>% 
+    # mutate(interval = interval(lag(progressDate), progressDate),
+    #        time = time_length(interval, 'days')) %>% 
+    # mutate(progressResult = paste0(progressValue, " ", progressResultShortDescription)) %>% 
+    group_by(personId, goalId, progressValue, 
+             progressResultShortDescription) %>% 
+    mutate(progressN = n()) %>% 
+    mutate(smartGoal = factor(smartGoal)) %>% 
+    mutate(goalStartDate = ymd(as_date(goalStartDate)), 
+           goalEndDate = ymd(as_date(goalEndDate))) %>% 
+    group_by(personId, goalId) %>% 
+    mutate(goalInterval = interval(goalStartDate, goalEndDate), 
+           goalTime = time_length(goalInterval, 'days')) %>% 
+    group_by(personId) %>% 
+    mutate(nOfGoals = n_distinct(goalId))
+  
+  pmSummary <- progressMonitoring %>% 
+    group_by(studentGroup) %>% 
+    reframe(goalTime = round(mean(goalTime, na.rm = T), 0), 
+             nOfPmGoals = round(mean(nOfGoals, na.rm = T), 1)) %>% 
+    mutate(studentGroup = factor(studentGroup, 
+                                 levels = c('Exit ME', 
+                                            'Exit DNM', 
+                                            'Plan ME', 
+                                            'Plan DNM'), 
+                                 labels = c(c('Exit Read Plan In Grade
+                                              3 and CMAS Meet/Exceed', 
+                                              'Exit Read Plan In Grade 3 and CMAS Did Not Meet/Exceed', 
+                                              'Did not Exit Plan and CMAS Meet/Exceed', 
+                                              'Did not Exit Plan and CMAS Did Not Meet/Exceed')))) 
+
+  # Distribution of time
+  progressMonitoringPlot <- progressMonitoring %>% 
+    distinct(personId, goalId, .keep_all = T)
+  
+  ggplot(data = progressMonitoringPlot, 
+         mapping = aes(x= nOfGoals))+
+    geom_histogram(bins = 50)
+  
+  # Summary PM for P.G.
+ggplot(data = progressMonitoring, 
+       mapping = aes(x = progressDate, 
+                     y = progressValue, 
+                     group = smartGoal, 
+                     color = factor(progressValue)
+                     )) +
+  geom_line()+
+  geom_point() +
+  geom_text(aes(label = progressResultShortDescription), 
+            size = 2, 
+            vjust = 1)+
+  scale_x_date(date_breaks = "months" , date_labels = "%b-%y") +
+  scale_color_manual(values = c('#c1571a', '#fbb040', '#6c7070', '#1b8367'))+
+  ylim(-2, 2)+
+  facet_wrap(~fct_reorder(smartGoal, goalStartDate),
+             ncol = 1
+             ) +
+  theme_minimal()+
+  theme(axis.title = element_blank(),
+        axis.text.y = element_blank(),
+        panel.grid = element_blank(),
+        legend.position = 'none', 
+        legend.title = element_blank(), 
+        strip.text = element_text(hjust = 0), 
+        strip.background = element_rect(fill = 'pink'))
+
+
+
 # # isntructionDescription ----
 # qryInstructionDescription <- odbc::dbGetQuery(con, 
 #                                        "
@@ -575,255 +1009,3 @@ instructionPlanNoEndMEN <- instructionPlanNoEndME$instructionAndFlag
 # "
 # )
 # 
-# # Need Progress Monitoring Result ----
-# qrystudentProgress <- odbc::dbGetQuery(con, 
-#                                    "
-#  SELECT 
-#   DISTINCT
-#    tStudentNeed.studentNeedID
-#    ,tStudentNeed.FirstName
-#    ,tStudentNeed.LastName
-#    ,tStudentNeed.PersonID
-#    ,tInstruction.ImplementedDate
-#    ,tInstruction.InstructionID
-#    ,tInstruction.InstructionDescription
-#    ,tInstruction.InstructionMinutes
-#    ,tInstruction.TimesPerWeek
-#    ,tInstruction.NumberOfTimes
-#    ,tInstructionFrequencyType.InstructionFrequencyTypeName
-#    ,tInstruction.InstructionFrequencyTypeID
-#    ,tInstructionType.InstructionTypeName
-#    ,tImplementerRole.ImplementerRoleName
-#    --,tGoal.ParentAcknowledgeDate
-#    ,tGoal.ProgressMonitoring
-#    ,tProgress.ProgressResultNameID
-#    ,tProgress.ProgressDate
-#    ,tProgress.LastUpdatedDate AS prgressLastUpdate
-#    ,tProgressResult.ProgressValue
-#    ,tProgressResult.ProgressResultShortDescription
-#    ,tMonitoringFrequencyType.MonitoringFrequencyTypeName
-#   ,tGoal.GoalStartDate
-#    ,tGoal.GoalEndDate
-#   ,tGoal.CreatedDate
-#   -- ,tGoal.LastUpdatedDate
-#    ,tGoal.GoalID
-#    ,tGoal.SmartGoal --must be at end of query
-# FROM
-#   dbSOARS.rti.tStudentNeed (NOLOCK)
-#   JOIN dbSOARS.rti.tStudentNeedFocusArea (NOLOCK) ON
-#     tStudentNeedFocusArea.StudentNeedID = tStudentNeed.StudentNeedID
-#   JOIN dbSOARS.rti.tGoal (NOLOCK) ON
-#     tGoal.StudentNeedID = tStudentNeed.StudentNeedID
-#   JOIN dbSOARS.rti.tNeedType (NOLOCK) ON
-#    tNeedType.NeedTypeID = tStudentNeed.NeedTypeID
-#   JOIN dbSOARS.rti.tFocusArea (NOLOCK) ON
-#    tFocusArea.FocusAreaID = tStudentNeedFocusArea.FocusAreaID
-#   JOIN dbSOARS.rti.tGoalInstruction (NOLOCK) ON
-#     tGoalInstruction.GoalID = tGoal.GoalID
-#   JOIN dbSOARS.rti.tGoalFocusArea (NOLOCK) ON
-#     tGoalFocusArea.GoalID = tGoal.GoalID AND
-#     tGoalFocusArea.GoalID = tGoalInstruction.GoalID
-#   JOIN dbSOARS.rti.tProgress(NOLOCK) ON
-#    tProgress.GoalID = tGoal.GoalID AND
-#   -- tProgress.LastUpdatedByStaffID = tGoal.LastUpdatedByStaffID AND
-#    tProgress.GoalID = tGoalInstruction.GoalID 
-#   JOIN dbSOARS.rti.tProgressResult (NOLOCK) ON
-#    tProgressResult.ProgressResultNameID = tProgress.ProgressResultNameID
-#   JOIN dbSoArs.rti.tInstruction (NOLOCK) ON
-#     tInstruction.InstructionID = tGoalInstruction.InstructionID AND
-#      tInstruction.studentNeedID = tStudentNeed.studentNeedID
-#   JOIN dbSoars.rti.tFocusAreaDesignator (NOLOCK) ON
-#     tFocusAreaDesignator.FocusAreaID =  tStudentNeedFocusArea.FocusAreaID
-#   JOIN dbSoars.rti.tDesignator (NOLOCK) ON
-#     tDesignator.DesignatorID =  tFocusAreaDesignator.DesignatorID
-#   JOIN dbSoars.rti.tImplementerRole (NOLOCK) ON
-#     tImplementerRole.ImplementerRoleID = tInstruction.ImplementerRoleID
-#   JOIN dbSoars.rti.tInstructionFrequencyType (NOLOCK) ON
-#    tInstructionFrequencyType.InstructionFrequencyTypeID = tInstruction.InstructionFrequencyTypeID
-#   JOIN dbSoars.rti.tInstructionType (NOLOCK) ON
-#     tInstructionType.InstructionTypeID = tInstruction.InstructionTypeID
-#   JOIN dbSoars.rti.tMonitoringFrequencyType (NOLOCK) ON
-#     tMonitoringFrequencyType.MonitoringFrequencyTypeID = tGoal.MonitoringFrequencyTypeID
-# WHERE
-#     tNeedType.NeedTypeName = 'READ'
-#   AND 
-#     tStudentNeed.ActiveFlag = 1
-#   AND 
-#     tStudentNeedFocusArea.ActiveFlag = 1
-#   AND 
-#     tGoal.ActiveFlag = 1
-#   AND 
-#     tNeedType.ActiveFlag = 1
-#   AND
-#     tFocusArea.ActiveFlag = 1
-#   AND 
-#     tGoalInstruction.ActiveFlag = 1
-#   AND 
-#     tProgress.ActiveFlag = 1
-#   AND 
-#     tProgressResult.ActiveFlag = 1
-#   AND 
-#     tInstruction.ActiveFlag = 1
-#   AND 
-#     tFocusAreaDesignator.ActiveFlag = 1
-#   AND 
-#     tImplementerRole.ActiveFlag = 1
-#   AND 
-#     tInstructionFrequencyType.ActiveFlag = 1
-#   AND
-#     tInstructionType.ActiveFlag = 1
-#   AND 
-#     tMonitoringFrequencyType.ActiveFlag = 1
-#   AND 
-#     tDesignator.ActiveFlag = 1
-#  
-#   AND 
-#     tInstruction.ImplementedDate > '2020-08-01'
-#     
-#   ORDER BY
-#     tInstruction.InstructionID,
-#     tGoal.goalID,
-#     tProgress.ProgressDate
-# "
-# )
-
-#Create table from https://www.cde.state.co.us/coloradoliteracy/advisorylistofinstructionalprogramming2020#intervention
-
-# interventionWords <- c(
-#   # 'orton', 
-#                        '\\bog', #imse and Yoshimoto are paired with OG
-#                        'orton|kilpatrick',
-#                        'lexia', # core 5 is paired with lexia in all exited instances
-#                        'burst', 
-#                        '95', 
-#                        'sipps', 
-#                        'i-ready', 'iready', 
-#                        'istation', 'station','i-station', 
-#                        'hmh', 'into reading', 
-#                        'heggerty', 
-#                        'lli:', 'leveled literacy',
-#                        'amplify|ckla',
-#                        'open court',
-#                        'bridge the gap', 
-#                        'mindplay',
-#                        'wonderworks',
-#                        'blast', 'really great', #blast is paired with really great
-#                        'countdown', # countdown is paired with really great
-#                        'hd', 'hd word', #hd is paired with high dosage tutoring and really great and hd word
-#                        'naturally', 'read natually', 'read live',
-#                        'kilptrick',
-#                        'reading corps', 'americorps', 
-#                        'wilson', 'fundations',
-#                        'voyager',
-#                        'ufli',
-#                        'valley speech', 
-#                        'icali', 'cali', 
-#                        'el education',
-#                        'wonders',
-#                        'boost',
-#                        'six minute', 'six-minute',
-#                        'spire',
-#                        'spot on', 
-#                        'ixl', 
-#                        'raz'
-#                        # ,
-#                        # 'amplify'
-#                        )
-
-interventionWordsCsv<- read_csv('G:/Shared drives/Research & Assessment Design (RAD)/L1 Projects/3rd Grade Reading/B  Scan/READActApprovedResources.csv', 
-                                col_select = c('regex', 'collapsed') )%>% 
-  filter(!is.na(regex)) %>% 
-  clean_names('lower_camel') 
-# %>% 
-#   select(-regexOneString)
-
-regexString <- interventionWordsCsv$regex
-# regexString <- interventionWordsCsv$regexOneString
-
-instructionalInterventions <- qrystudentPlan %>% 
-  clean_names('lower_camel') %>% 
-  filter(instructionTypeName != 'Core') %>% 
-  filter(personId %in% c(exitCmasMeetExceed, noExitCmas, NoPlanEnd, planEnd)) %>% 
-  select(personId, instructionDescription, instructionId) %>%
-  # filter(personId == 1054675) %>%
-  mutate(
-    intervention = instructionDescription %>%
-      str_to_lower() %>%
-      str_squish() %>% #remove whitespace
-      str_extract_all(
-        str_c(
-          regexString
-          , collapse = "|")
-        )
-    ) %>% 
-  unnest_longer(intervention, keep_empty = TRUE) %>% 
-  left_join(interventionWordsCsv, 
-            join_by(intervention == regex), 
-            relationship = "many-to-many")
-
-instructionInfo <- function(.group) {
-  instructInter <- instructionalInterventions %>% 
-    mutate(collapsed = case_when(
-      intervention == 'lli' ~ 'LLI', 
-      intervention == 'o.g.' ~ 'Orton Gillingham',
-      is.na(intervention) ~ 'No resource Identified',
-      TRUE ~ collapsed
-    )) %>% 
-    filter(personId %in% .group) %>% 
-    distinct(personId, 
-             instructionId,
-             # instructionTypeName,
-             intervention, 
-             collapsed,
-             # smartGoal, 
-             instructionDescription,
-             .keep_all = T) %>% 
-    ungroup() %>% 
-    group_by(collapsed) %>% #firstName, lastName, personId, instructionId, intervention, instructionTypeName
-    summarise(n = n()) %>% 
-    arrange(desc(n)) %>% 
-    head(5)
-}
-
-#Exit by grade 3
-instructionInfoPlanEnd <- instructionInfo(.group = planEnd)
-#Exit in grade 3
-instructionInfoPlanEndIn3 <- instructionInfo(.group = planEndGrade3)
-instructionInfoPlanEndME <- instructionInfo(.group = exitCmasMeetExceed)
-instructionInfoPlanNoEnd <- instructionInfo(.group = NoPlanEnd)
-instructionInfoPlanNoEndME <- instructionInfo(.group = noExitCmas)
-  
-  # Parent Acknowledgement ----
-  ## Query of students with parent acknowledgement of READ Plan ----
-  qryPlanAcknowledge <- odbc::dbGetQuery(con,
- "
-SELECT
-  StudentNeedID
-  ,PersonID
-  ,CurrentStatusCode
-  ,StatusDate
-  ,AcknowledgeDate
-  ,CreatedDate
-  ,IsOpen
-FROM
-  dbSoars.rti.vCurrentNeedStatus (NOLOCK)
-WHERE
-  NeedTypeID = 7
-")
-
-  planAcknowledge <- qryPlanAcknowledge %>% 
-    clean_names('lower_camel') %>% 
-    filter(personId %in% NoPlanEnd | personId %in% planEnd) %>% 
-    mutate(acknowledgedPlan = case_when(
-      is.na(acknowledgeDate) ~ 0, 
-      TRUE ~ 1
-    )) %>% 
-    group_by(isOpen) %>% 
-    mutate(n = n()) %>% 
-    group_by(isOpen, acknowledgedPlan) %>% 
-    mutate(acknowN = n(), 
-           acknowPct = acknowN/n) %>% 
-    group_by(currentStatusCode, acknowledgedPlan) %>% 
-    reframe(n = first(n), 
-            acknowN = first(acknowN), 
-            acknowPct = first(acknowPct))
