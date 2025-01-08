@@ -7,6 +7,7 @@
 #load libraries ----
 library(odbc)
 library(DBI)
+library(gt)
 library(janitor)
 library(tidyverse)
 
@@ -76,7 +77,7 @@ grade3Cmas <- flagGrade3 %>%
   select(personID, studentGroup)
 
 exitCmasMeetExceed <- grade3Cmas %>% 
-  filter(planEnd == 'Exited READ plan in Grade 3') %>% 
+  filter(studentGroup %in% c('Exit DNM', 'Exit ME')) %>% 
   pull(personID)
 
 # toString(exitCmasMeetExceed)
@@ -99,7 +100,7 @@ NoPlanEnd <- flagStart %>%
 
 ## Students Still on Plan with CMAS M/E ----
 noExitCmas <- grade3Cmas %>% 
-  filter(planEnd == 'on READ Plan') %>% 
+  filter(studentGroup %in% c('Plan DNM', 'Plan ME')) %>% 
   pull(personID)
 
 # toString(noExitCmas)
@@ -458,9 +459,9 @@ cleanStudentPlans <- function(stuGroup) {
     group_by(instructionTypeName, instructionFrequencyTypeId) %>% 
     mutate(minutesMean = round(mean(instructionMinutes, na.rm = T), 1), 
            freqMean = round(mean(numberOfTimes, na.rm = T), 1)) %>% 
-    group_by(implementerRoleName, instructionTypeName) %>% 
+    group_by(instructionTypeName) %>% #implementerRoleName
     mutate(roleN = n()) %>% 
-    group_by(instructionTypeName, implementerRoleName, instructionFrequencyTypeName) %>% 
+    group_by(instructionTypeName, instructionFrequencyTypeName) %>% #implementerRoleName
     summarise(minutesMean = first(minutesMean), 
               freqMean = first(freqMean), 
               roleN = first(roleN)) %>% 
@@ -510,7 +511,7 @@ instructionalInteractions <- allResults[[1]]$instructionInteractions %>%
   bind_rows(allResults[[2]]$instructionInteractions) %>% 
   bind_rows(allResults[[3]]$instructionInteractions) %>% 
   bind_rows(allResults[[4]]$instructionInteractions) %>% 
-  select(implementerRoleName, instructionTypeName, studentGroup, roleN) %>% 
+  select(instructionTypeName, studentGroup, roleN) %>% #implementerRoleName
   group_by(studentGroup, instructionTypeName) %>% 
   # top_n(3) %>% 
   mutate(studentGroup = factor(studentGroup, 
@@ -545,7 +546,6 @@ allResults[[2]]$instructionAndFlag
 allResults[[3]]$instructionAndFlag 
 allResults[[4]]$instructionAndFlag
 
-library(gt)
 
 #### Table for N of service providers for each type of instructional service ----
 gt(instructionalInteractions) %>% 
@@ -596,7 +596,7 @@ gt(freqDuration) %>%
 
 # Access the names of the resources for intervention ----
 ## Access Lookup table with the names of the resources and the names collapsed ----
-interventionWordsCsv<- read_csv('G:/Shared drives/Research & Assessment Design (RAD)/L1 Projects/3rd Grade Reading/B  Scan/READActApprovedResources.csv', 
+interventionWordsCsv <- read_csv('G:/Shared drives/Research & Assessment Design (RAD)/L1 Projects/3rd Grade Reading/B  Scan/Document Review/READActApprovedResources.csv', 
                                 col_select = c('regex', 'collapsed') )%>% 
   filter(!is.na(regex)) %>% 
   clean_names('lower_camel') 
@@ -623,6 +623,70 @@ instructionalInterventions <- qrystudentPlan %>%
   left_join(interventionWordsCsv, 
             join_by(intervention == regex), 
             relationship = "many-to-many")
+
+#Distinct instances of interventions used ----
+instructionInfoDistinct <- function(stuGroup) {
+  
+  personIds <- grade3Cmas %>% 
+    filter(studentGroup == stuGroup) %>% 
+    pull(personID)
+  
+instInter <- instructionalInterventions %>% 
+  mutate(collapsed = case_when(
+    intervention == 'lli' ~ 'LLI', 
+    intervention == 'o.g.' ~ 'Orton Gillingham',
+    intervention == 'og ' ~ 'Orton Gillingham',
+    is.na(intervention) ~ 'No resource Identified',
+    TRUE ~ collapsed
+  )) %>% 
+  filter(personId %in% personIds) %>% 
+  distinct(personId, collapsed) %>% 
+  group_by(collapsed) %>% 
+  summarise(count = n()) %>% 
+  arrange(desc(count)) %>% 
+  head(5) %>% 
+  mutate(studentGroup = stuGroup)
+}
+
+studentGroups <- unique(grade3Cmas$studentGroup)
+
+## Map groups through function ----
+interventionResults <- map(.x = studentGroups, .f = instructionInfoDistinct) %>% 
+  bind_rows() %>%
+  mutate(studentGroup = factor(studentGroup, 
+                               levels = c('Exit ME', 
+                                          'Exit DNM', 
+                                          'Plan ME', 
+                                          'Plan DNM'), 
+                               labels = c(c('Exit Read Plan In Grade 3 and CMAS Meet/Exceed', 
+                                            'Exit Read Plan In Grade 3 and CMAS Did Not Meet/Exceed', 
+                                            'Did not Exit Plan and CMAS Meet/Exceed', 
+                                            'Did not Exit Plan and CMAS Did Not Meet/Exceed')))) %>% 
+  group_by(studentGroup)
+
+gt(interventionResults) %>% 
+  cols_label(collapsed = 'Resource Cited', 
+             count = 'Count of Instances') %>% 
+  fmt_number(columns = count, 
+             decimals = 0) %>% 
+  tab_header(title = 'Counts of Instances resources were used') %>% 
+  cols_align(
+    align = c("left"),
+    columns = collapsed
+  ) %>% 
+  cols_align(
+    align = c("center"),
+    columns = count
+  ) %>% 
+  opt_table_outline() %>% 
+  tab_style(
+    cell_fill('grey'), 
+    cells_row_groups()
+  ) %>% 
+  tab_options(
+    table.font.size = 12
+  )
+
 
 instructionInfo <- function(stuGroup) {
  
