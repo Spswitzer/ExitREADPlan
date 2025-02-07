@@ -28,7 +28,7 @@ qryREADPlanSubmission <- odbc::dbGetQuery(con,
   FROM
     dbSOARS.readplan.tREADSubmission (NOLOCK) 
   WHERE
-    tREADSubmission.EndYear BETWEEN 2021 AND 2024
+    tREADSubmission.EndYear BETWEEN 2018 AND 2024
 "
 )
 
@@ -48,6 +48,15 @@ allCohorts <- readCleaned %>%
             readN = n(), 
             readPct = readN/gradeN)
   
+allCohortsNoGrade <- readCleaned %>% 
+  group_by(endYear) %>% 
+  mutate(N = n()) %>% 
+  group_by(endYear, interventionServicesRead) %>% 
+  summarise(N = first(N), 
+            readN = n(), 
+            readPct = readN/N)
+
+
 
 allCohortsAllGrades <- readCleaned %>% 
   group_by(endYear) %>% 
@@ -84,7 +93,7 @@ planByYear <- function(.endyear = 2021) {
       table.font.size = 12
     ) %>% 
     tab_header(
-      title = 'Student Plan starting season', 
+      title = 'READ Plan Funded', 
       subtitle = paste0('Grade 3 in ' , .endyear)
     )
   return(gradesTable)

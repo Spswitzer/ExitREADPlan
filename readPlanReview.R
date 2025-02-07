@@ -32,12 +32,20 @@ planEndGrade3<- flagStart %>%
 ## PlanEnd Exited with Cmas MeetsExceeds ----
 cmasPerformance <- 
   readRDS('data/cmasPerformance.rds')  
-
-flagGrade3 <- flagStart %>% 
-  filter(gradeInt == 3, 
+# 
+flagGrade3 <- flagStart %>%
+  filter(gradeInt == 3,
          EndYear == 2024
-  ) %>% 
+  ) %>%
   distinct(personID, planEnd)
+# flagGrade3 <- flagStart %>% 
+#   group_by(personID) %>% 
+#   fill(planEnd, .direction = 'downup') %>% 
+#   filter(planEnd == '3- Exit plan'| is.na(planEnd), 
+#          gradeInt == 3, 
+#          EndYear == 2024
+#   ) %>% 
+#   distinct(personID, planEnd)
 
 grade3Cmas <- flagGrade3 %>% 
   ungroup() %>% 
