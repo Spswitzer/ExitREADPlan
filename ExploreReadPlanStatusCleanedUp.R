@@ -74,7 +74,7 @@ AND
 
 # saveRDS(qryFlags, 'data/qryFlags.rds')
 
-# qryFlags <- 
+# qryFlags <-
 #   readRDS('data/qryFlags.rds')
 
 #Load Demographics Look up Tables ----
@@ -628,7 +628,7 @@ ggplot(data = grade3ExitedCMAS,
   geom_bar(stat= 'identity', 
            position = 'stack', 
            alpha = 0.8) +
-  geom_label(aes(label = paste0(groupN, '-', scales::percent(groupPct, 1))), 
+  geom_label(aes(label = paste0(groupN, ' (', scales::percent(groupPct, 1), ')')), 
              position = position_stack(vjust = 0.5), 
              size = 4,
              show.legend = F
@@ -688,16 +688,18 @@ grade3ExitedCMAS <- flagGrade3 %>%
                                      "Grade 2", 
                                      "Grade 3")
   )
-  )
+  ) %>% 
+  # filter(planEnd != 'Kindergarten') %>% 
+  select(`Proficiency Level` = cmasProfLevel, everything())
 
 ggplot(data = grade3ExitedCMAS, 
        mapping = aes(x = totalN, 
                      y = groupPct, 
-                     fill = cmasProfLevel))+
+                     fill = `Proficiency Level`))+
   geom_bar(stat= 'identity', 
            position = 'stack', 
            alpha = 0.8) +
-  geom_label(aes(label = paste0(groupN, '-', scales::percent(groupPct, 1))), 
+  geom_label(aes(label = paste0(groupN, ' (', scales::percent(groupPct, 1),')')), 
              position = position_stack(vjust = 0.5), 
              size = 4,
              show.legend = F
@@ -709,16 +711,16 @@ ggplot(data = grade3ExitedCMAS,
     'Partially Met' = '#e57a3c', 
     'Did Not Yet Meet'= '#d8274a'
   )) +
-  facet_wrap(~planEnd, 
+  facet_wrap(~(planEnd), 
              ncol = 4, 
              strip.position = "bottom",) +
-  # labs(title = 'CMAS Performace', 
-  #      subtitle = 'Grade 3 in 2024') +
+  labs(x = 'Grade Level When Students Exited READ Plan', 
+       title = 'CMAS ELA or CSLA') +
   theme_minimal() +
-  theme(axis.title = element_blank(), 
+  theme(axis.title.y = element_blank(), 
         axis.text = element_blank(), 
-        legend.position = 'top', 
-        legend.title = element_blank(), 
+        legend.position = 'right', 
+        # legend.title = element_text(), 
         panel.grid =  element_blank(), 
         strip.text = element_text(size = 14))
 
@@ -1623,9 +1625,15 @@ AND
 studentExitGrade3 <- flagStart %>% 
    filter(Grade == '3' & EndYear == 2024) %>% 
   select(personID, CampusSchoolName, PlanStartDate, planEndDate) %>% 
-  mutate(planEnd = if_else(is.na(planEndDate), 0, 1), 
+  mutate(
+    # planEnd = if_else(is.na(planEndDate), 0, 1), 
+    planEnd = case_when(
+      !is.na(planEndDate) & 
+        planEndDate > '2023-08-01' &
+        planEndDate < '2024-06-01' ~ 1, 
+      TRUE ~ 0),
          planStart = if_else(!is.na(PlanStartDate), 1, 0)) %>% 
-  select(personID, planStart, planEnd)
+  select(personID, planStart, planEnd, planEndDate)
 
 ## October Count Students ----
 totalGradeThree <- read.csv('C:/Users/sswitzer/Documents/GitHub/ExitREADPlan/data/2023-24_Membership_Grade_bySchool.csv') %>% 
@@ -1655,39 +1663,91 @@ teacherSummary <- teacherStudentLink %>%
          onPlanPct = round(onPlanN/grade3Count, 2)
          ) %>% 
   group_by(teacher, school, planEnd) %>% 
-  summarise(
+  mutate(
     grade3Count = first(grade3Count),
          onPlanN = first(onPlanN), 
          onPlanPct = first(onPlanPct),
          exitN = n(), 
          exitPct = round(exitN/onPlanN, 2)) %>% 
-  filter(planEnd == 1, 
-         exitPct > .21, 
-         onPlanPct > .20) %>% 
+  filter(planEnd == 1
+         ,
+         exitPct > .21,
+         onPlanPct > .20
+         ) %>% 
   arrange(desc(onPlanPct), desc(exitPct)) %>% 
-  head(15) %>% 
+  # head(15) %>% 
   select(-planEnd) %>% 
   mutate(school = str_remove(school, 'Elementary')) %>% 
-  arrange(dec(exitPct))
+  arrange(desc(exitPct))
+
+teacherWithStudents <- function(teacherName) {
+  prepTeacherTable <- teacherSummary %>% 
+    filter(teacher == teacherName) %>% 
+    select(teacher, firstName, lastName) %>% 
+    ungroup() %>% 
+    arrange(lastName)
+  
+  gt(prepTeacherTable) %>% 
+    cols_label(firstName = 'First Name', 
+               lastName = 'Last Name') %>% 
+    tab_header(unique(prepTeacherTable$teacher)) %>% 
+    cols_hide(c(school, planEnd, teacher)) %>% 
+    tab_options(column_labels.font.weight = 'bold' )
+    
+  
+}
+
+
+unique(teacherSummary$teacher)
+
+teacherWithStudents(teacherName = 'Cifuentes, Paola')
+teacherWithStudents(teacherName = 'Scadden')
+teacherWithStudents(teacherName = 'Mrs. Willis')
+teacherWithStudents(teacherName = 'Mrs. Doran')
+teacherWithStudents(teacherName = 'Cutting, Miranda J')
+teacherWithStudents(teacherName = 'Weisberg, Christine L')
+
 
 ## Summary of schools ----
+# write.csv(schoolSummary, 'data/schoolSummaryFocusGroup.csv')
+
  schoolSummary <- teacherStudentLink %>% 
   group_by(school) %>% 
   mutate(onPlanN = n(), 
          onPlanPct = round(onPlanN/grade3Count, 2)) %>% 
-  group_by(school, planEnd) %>% 
-  summarise(grade3Count = first(grade3Count),
+  group_by(school,schoolCode, planEnd) %>% 
+  mutate(grade3Count = first(grade3Count),
             onPlanN = first(onPlanN), 
             onPlanPct = first(onPlanPct),
             exitN = n(),
             exitPct = round(exitN/onPlanN, 2)) %>% 
-  filter(planEnd == 1, 
-         exitPct > .21, 
-         onPlanPct > .33) %>% 
+  filter(planEnd == 1
+         # ,
+         # exitPct > .21,
+         # onPlanPct > .33
+         ) %>% 
   arrange(desc(onPlanPct), desc(exitPct)) %>% 
-  head(15) %>% 
-  select(-planEnd)
+  # head(15) %>%
+  select(-planEnd) %>% 
+  arrange(school)
 
+schoolTable <- function(schoolName) {
+ prepforFocusGroupTable <-  schoolSummary %>% 
+   filter(school == schoolName) %>% 
+   select(school, lastName, firstName) %>% 
+   ungroup()
+ 
+ gt(prepforFocusGroupTable) %>% 
+   cols_label(firstName = 'First Name', 
+              lastName = 'Last Name') %>% 
+   tab_header(unique(prepforFocusGroupTable$school)) %>% 
+   cols_hide(c(schoolCode, planEnd, school)) %>% 
+   tab_options(column_labels.font.weight = 'bold')
+}
+
+unique(schoolSummary$school)
+
+schoolTable("Secrest Elementary")
   # Total Students in Cohort ----
   # Query of READ Plan Flag in Campus ----
   qryNoFlags <- odbc::dbGetQuery(con, 
