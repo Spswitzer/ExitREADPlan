@@ -159,4 +159,7 @@ flagStart <- qryFlags %>%
   filter(cdeSchoolCode %in% c('8090', '5350', '3216', '3536', '4190', 
                               '5350', '9328', '5354', '7708', '8300', '9342'))
 
+
+saveRDS(flagStart, file = 'data/targetStudents2025.rds')
+
   
