@@ -6,11 +6,8 @@
 # The purpose of this script is to determine which 3rd students (2023-2024) from the kindergarten class of 2020-2021 had a READ plan at any time and when/if they exited the plan
 
 #load libraries ----
-library(gt)
 library(odbc)
 library(DBI)
-library(corrplot)
-library(Hmisc)
 library(janitor)
 library(tidyverse)
 # connect to SQL database ----
