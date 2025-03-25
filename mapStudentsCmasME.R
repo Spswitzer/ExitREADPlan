@@ -80,7 +80,7 @@ qryCmas <- dbGetQuery(con,
 cmasPerformance <- qryCmas %>% 
   clean_names('lower_camel') %>% 
   filter(contentGroupName == 'READING', 
-         testName != 'CMAS CSLA Grade 03 2023-24',
+         testName != 'CMAS CSLA Grade 03 2023-24', <- 
          grade == '3', 
          endYear == 2024, 
          !is.na(proficiencyLongDescription)) %>% 

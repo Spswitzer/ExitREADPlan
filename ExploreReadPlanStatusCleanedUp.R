@@ -1994,3 +1994,118 @@ AND
     filter(is.na(K) & is.na(PK) & is.na(`1`)) %>% 
     summarise(sum = n())
   
+  
+  # Demos of students on Plan ----
+  ## Summary table ----
+  readDemosSummary <-  flagStart %>% 
+    fill(planEnd, .direction = 'updown') %>% 
+    fill(planStart, .direction = 'updown') %>% 
+    filter(EnrollmentEndDate == max(EnrollmentEndDate)) %>% 
+    mutate(planEnd = str_remove(planEnd, "^.{0,3}")) %>% 
+    mutate(planEnd = replace_na(planEnd, "No exit by end of grade 3"))
+  
+  readDemosSummaryLong <-  readDemosSummary %>% 
+    mutate(across(c(jsel, jeffcoPk, childFind, remoteKinder), as.character)) %>% 
+    pivot_longer(cols = c(raceLabels, mlLabels, iepLabels, frlLabels, gtLabels, jsel, jeffcoPk, childFind, remoteKinder), 
+                 names_to = 'category', 
+                 values_to = 'categoryValue') %>% 
+    mutate(categoryValue = replace_na(categoryValue, '0')) %>% 
+    group_by(category, categoryValue, planEnd) %>%
+    filter(!is.na(planStart)) %>%
+    # mutate(planEnd = str_remove(planEnd, "^.{0,3}")) %>% 
+    # mutate(planEnd = replace_na(planEnd, "No exit by end of grade 3")) %>% 
+    group_by(personID) %>% 
+    mutate(planEndDate = replace_na(planEndDate, as.Date("2024-05-24"))) %>% 
+    group_by(category) %>% 
+    mutate(category = factor(category, 
+                             levels = c( 
+                               "frlLabels", 
+                               "iepLabels", 
+                               "mlLabels", 
+                               "raceLabels",  
+                               "gtLabels",
+                               "jeffcoPk",
+                               "childFind", 
+                               "jsel", 
+                               "remoteKinder"),
+                             labels = c(
+                               'Free or Reduced Lunch Eligible', 
+                               "Individualized Education Program",
+                               "Multilingual Learner Program", 
+                               "Students of Color or Hispanic", 
+                               'Gifted and Talented Program', 
+                               "Jeffco PK",
+                               'Child Find Program', 
+                               "Jeffco Summer Literacy Program", 
+                               "Remote Kindergarten Program")
+    )) %>% 
+    mutate(categoryValue = factor(categoryValue, 
+                                  levels = c("Free or Reduced Lunch Eligible", "Not Free or Reduced Lunch" , 
+                                             "IEP", "No IEP",
+                                             "Multilingual Learner", "Not ML", 
+                                             "Students of Color or Hispanic", "White Students", 
+                                             "GT", "Not GT" , 
+                                             '1', '0'), 
+                                  labels = c("Yes", "No" , 
+                                             "Yes", "No" ,
+                                             "Yes", "No" ,
+                                             "Yes", "No" ,
+                                             "Yes", "No" ,
+                                             "Yes", "No")
+    )) %>% 
+    arrange(category, categoryValue) %>% 
+    select(personID, planStart, planEnd, category, categoryValue) %>% 
+    mutate(totalN = n()) %>% 
+    group_by(category, categoryValue) %>% 
+    reframe(n = n(), 
+              pct = round(n/totalN, 2)) %>% 
+    group_by(category, categoryValue) %>% 
+    summarise(n = first(n), 
+              pct = first(pct)) %>% 
+    filter(categoryValue == 'Yes', 
+           !category %in% c('Child Find Program', 'Jeffco Summer Literacy Program', 'Remote Kindergarten Program', 'Students of Color or Hispanic')) %>% 
+    ungroup()
+  
+  
+gt(readDemosSummaryLong) %>% 
+  cols_label(category = 'Student Group', 
+             n = 'Number of students', 
+             pct = 'Percent of students') %>% 
+  cols_width(
+    n  ~ px(200), 
+    pct ~ px(200)) %>% 
+  cols_align(
+    align = c("left"),
+    columns = category
+  ) %>% 
+  cols_align(
+    align = c("center"),
+    columns = c(n, pct)
+  ) %>% 
+  opt_table_outline() %>% 
+  tab_style(
+    cell_fill('grey'), 
+    cells_row_groups()
+  ) %>% 
+  cols_hide(
+    c(categoryValue)
+  ) %>% 
+  fmt_percent(
+    pct, 
+    decimals = 0
+  ) %>% 
+  fmt_number(
+    n, 
+    decimals = 0
+  ) %>% 
+  tab_header(
+    title = 'Students with READ Plan and additional programming', 
+    subtitle = '2024 Student Cohort (Grade 3 in 2023-2024)'
+  ) %>% 
+  tab_options(
+    table.font.size = 14
+  ) %>% 
+  tab_footnote(footnote = 'Students could be represented in multiple groups', 
+               locations = cells_column_labels(columns = n),
+               placement = 'left')
+  
